@@ -10,6 +10,7 @@
 
 use aberredengine::prelude::*;
 
+use crate::graph::frame_doc;
 use crate::model::Workspace;
 use crate::ops;
 use crate::systems::file_dialogs::{
@@ -17,7 +18,7 @@ use crate::systems::file_dialogs::{
 };
 
 /// One user intent, produced by the File menu, a shortcut or a tab close button.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, PartialEq)]
 pub enum EditorAction {
     /// File > New / Ctrl+N: append an untitled doc and activate it.
     New,
@@ -31,6 +32,10 @@ pub enum EditorAction {
     CloseTab(usize),
     /// File > Quit / Ctrl+Q.
     Quit,
+    /// View > "Frame all" / F: fit the active doc's graph into the viewport. No-op without an
+    /// active doc. `viewport` is the window size in screen pixels, read by the producer from
+    /// `ui.io().display_size`.
+    FrameAll { viewport: Vec2 },
 }
 
 /// Effects of an applied action that need more than the workspace itself.
@@ -147,6 +152,12 @@ pub fn apply_action(
             QuitDecision::QuitNow => fx.quit = true,
             QuitDecision::Confirm => ws.pending_quit = true,
         },
+        EditorAction::FrameAll { viewport } => {
+            // No active doc: no-op.
+            if let Some(doc) = ws.active_doc_mut() {
+                frame_doc(doc, viewport);
+            }
+        }
     }
     log::debug!(
         "action {action:?} applied: active={}, docs={}, pending_close={:?}, pending_quit={}",
@@ -360,6 +371,35 @@ mod tests {
         assert!(fx.dialog.is_none() && !fx.quit);
         assert_eq!(ws.docs.len(), 1);
         assert_eq!(ws.pending_close, None);
+    }
+
+    #[test]
+    fn frame_all_sets_the_active_docs_camera_view_only_and_no_ops_without_a_doc() {
+        let viewport = Vec2::new(800.0, 600.0);
+        let mut ws = Workspace::default();
+        // No active doc: no-op (no panic, nothing happens).
+        let fx = apply_action(&mut ws, EditorAction::FrameAll { viewport }, None);
+        assert!(fx.dialog.is_none() && !fx.quit);
+        assert!(ws.docs.is_empty());
+
+        ops::open_path(&mut ws, &fixture("guard.json")).expect("opens");
+        let revision = ws.active_doc().unwrap().revision;
+        let mut expected_doc = ws.active_doc().unwrap().clone();
+        frame_doc(&mut expected_doc, viewport);
+        assert_ne!(
+            ws.active_doc().unwrap().camera,
+            expected_doc.camera,
+            "framing changes the default camera of a laid-out doc"
+        );
+        let fx = apply_action(&mut ws, EditorAction::FrameAll { viewport }, None);
+        assert!(fx.dialog.is_none() && !fx.quit);
+        let doc = ws.active_doc().unwrap();
+        assert_eq!(doc.camera, expected_doc.camera);
+        assert_eq!(
+            doc.revision, revision,
+            "FrameAll is view-only: no revision bump"
+        );
+        assert!(!doc.dirty, "FrameAll does not dirty the doc");
     }
 
     #[test]

@@ -14,6 +14,7 @@ fn main() {
         .config_str(include_str!("../config.ini"))
         .on_setup(systems::setup::load_state)
         .add_system(systems::file_dialogs::poll_async_dialogs)
+        .add_system(graph::graph_frame_system)
         .add_late_system(graph::graph_projection_system)
         .add_observer(systems::window_resize::on_window_resized)
         .add_scene("editor")

@@ -50,6 +50,12 @@ pub fn draw(ctx: &mut GuiCtx, active: Option<usize>, actions: &mut Vec<EditorAct
     });
     ui.menu("View", || {
         ui.menu_item_config("Re-layout").enabled(false).build();
-        ui.menu_item_config("Frame all").enabled(false).build();
+        // Enabled only with an active doc; the viewport is imgui's display size (== render size).
+        if item(ui, "Frame all", "F", active.is_some()) {
+            let size = ui.io().display_size;
+            actions.push(EditorAction::FrameAll {
+                viewport: Vec2::new(size[0], size[1]),
+            });
+        }
     });
 }

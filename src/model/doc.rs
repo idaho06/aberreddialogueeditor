@@ -98,8 +98,10 @@ impl Default for CamState {
 ///
 /// Mutation rule: every mutator bumps `revision`; every mutator also sets `dirty = true` except
 /// [`DialogueDoc::set_node_pos`] and [`DialogueDoc::select`] (view-only changes — positions are never
-/// saved, selection is not content) and [`DialogueDoc::mark_clean`] (clears `dirty`). A call that cannot
-/// apply (unknown key, inapplicable slot) is a no-op and does not bump. Pure queries never bump.
+/// saved, selection is not content) and [`DialogueDoc::mark_clean`] (clears `dirty`), and except
+/// [`DialogueDoc::set_camera`], which bumps nothing at all: the camera is pure view state, so it must
+/// not invalidate the lint cache or trigger a projection. A call that cannot apply (unknown key,
+/// inapplicable slot) is a no-op and does not bump. Pure queries never bump.
 #[derive(Debug, Clone, PartialEq, Default)]
 pub struct DialogueDoc {
     /// Unique id of this doc within its [`Workspace`] (assigned by [`Workspace::add_doc`],
@@ -365,6 +367,13 @@ impl DialogueDoc {
     pub fn mark_clean(&mut self) {
         self.dirty = false;
         self.bump_view();
+    }
+
+    /// Sets the graph-view camera. View-only like [`DialogueDoc::set_node_pos`]/[`select`], but bumps
+    /// NOTHING — not even `revision`: the camera is view state, so the lint cache stays valid and no
+    /// projection is triggered.
+    pub fn set_camera(&mut self, camera: CamState) {
+        self.camera = camera;
     }
 
     /// The doc's current lint problems, cached per `revision`: recomputed only when `revision`
@@ -685,6 +694,36 @@ mod tests {
                 Dirty::Cleared => assert!(!doc.dirty, "{name}: must clear dirty"),
             }
         }
+    }
+
+    #[test]
+    fn set_camera_is_view_only_and_keeps_the_lint_cache_valid() {
+        let (mut doc, _a, _b) = base_doc();
+        let _ = doc.problems(); // fill the lint cache at the current revision
+        let revision = doc.revision;
+        let cached = doc.lint_cache.clone();
+        assert!(cached.is_some(), "the cache is filled");
+        assert!(!doc.dirty, "base doc is clean");
+        doc.set_camera(CamState {
+            target: Vec2::new(50.0, -20.0),
+            zoom: 2.5,
+        });
+        assert_eq!(doc.camera.target, Vec2::new(50.0, -20.0));
+        assert!((doc.camera.zoom - 2.5).abs() < 1e-6);
+        assert_eq!(doc.revision, revision, "set_camera must not bump revision");
+        assert!(!doc.dirty, "set_camera must not touch dirty");
+        assert_eq!(doc.lint_cache, cached, "the lint cache is untouched");
+        // problems() still serves the cached result (no recompute at an unchanged revision).
+        let problems = doc.problems().len();
+        doc.set_camera(CamState::default());
+        assert_eq!(doc.problems().len(), problems);
+        assert_eq!(doc.revision, revision);
+        // A dirty doc stays dirty.
+        doc.add_node(Vec2::new(1.0, 1.0));
+        let revision = doc.revision;
+        doc.set_camera(CamState::default());
+        assert_eq!(doc.revision, revision);
+        assert!(doc.dirty, "set_camera must not clear dirty either");
     }
 
     #[test]

@@ -50,7 +50,9 @@ All acceptance commands are `just` recipes (run from the repo root):
   `aberredengine::prelude::{DialogueDef, NodeDef, ChoiceDef, DialogueCondition, DialogueCmp, DialogueEffect,
   DialogueTree, DialogueError, Vec2}`.
 - Every mutation on `DialogueDoc` goes through a named mutator that bumps `revision` and sets `dirty`;
-  `set_node_pos`, `select` and `mark_clean` only bump `revision` (view-only, never saved).
+  `set_node_pos`, `select` and `mark_clean` only bump `revision` (view-only, never saved), and
+  `set_camera` bumps nothing at all — like the other view-only mutators it never sets `dirty`, and it
+  must not invalidate the lint cache or trigger a projection (the camera is pure view state).
 - `from_def`/`to_def` convert to/from the engine's `DialogueDef`, and only at load/save.
 - `lint::lint` reports ALL problems of a doc (cached per `revision` via `DialogueDoc::problems`);
   `lint::engine_gate` (`DialogueTree::try_from(to_def(doc))`) is the save gate — engine rules are never
@@ -139,3 +141,17 @@ All acceptance commands are `just` recipes (run from the repo root):
   position is its top-left. Edges are bezier entities at the source pin (control points relative to it) with one
   arrowhead `GraphPart` child (`arrowhead_points`, pure + tested); `RewriteEdge` assigns position/shape only when
   different. Logs `projection: N nodes, M edges` at debug on plans that change anything.
+
+## Graph camera system (plan 03 step 3)
+
+- `src/graph/camera_system.rs` holds `graph_frame_system` — registered with `add_system` in `main.rs` (Update),
+  the one system later steps extend with the rest of the graph input so camera update and input run in a fixed
+  order. Each tick it locks the workspace briefly, reads the active doc's `CamState`, and writes
+  `MainCamera(Camera2D::new(target, viewport/2).with_zoom(zoom))` via the plain `camera_update` (viewport =
+  `GameConfig` render size; no active doc leaves the camera alone). Wheel zoom (`apply_wheel` = `zoom_at` with
+  `1.1^scroll_y` around the cursor) and middle-mouse pan (`Action3`, `pan_step` accumulating screen-pixel deltas
+  in a `Local<Option<Vec2>>`, never `mouse_world_*`) are ignored while `UiCapture::mouse` is set, except a pan
+  already in progress; results go back through the view-only `DialogueDoc::set_camera`.
+- `src/graph/frame.rs` (pure): `frame_doc(doc, viewport)` = `set_camera(frame_all(graph_bounds(doc), viewport, 40.0))`.
+  `EditorAction::FrameAll { viewport }` (actions.rs; View > "Frame all" and the `F` key, both reading the viewport
+  from `ui.io().display_size`) is applied in `apply_action` via `frame_doc`; no-op without an active doc.
