@@ -5,6 +5,25 @@
 inspector, the Problems panel lists all lint findings, saving is gated by the engine, docs are written, a vibe
 code-review pass is done, and the final checklist at the end is green. All steps committed by the user.
 
+**Revision note (2026-11-06, after plan 03 was executed).** Corrections versus the first draft:
+- Tests live in `#[cfg(test)]` modules next to the code (the crate is a binary; `tests/*.rs` cannot import its
+  modules). Every `tests/**` reference below (`tests/inspector_edits.rs`, `tests/expr_edit.rs`, ...) means such a
+  module; fixtures load with `include_str!(concat!(env!("CARGO_MANIFEST_DIR"), ...))` (helpers: `graph::fixtures`).
+- All model mutators already exist (`set_text`, `set_speaker`, `set_labels`, `rename_node`, `set_start`, `select`,
+  `delete_node`, `set_outputs`, `set_link`, `add_choice`, `delete_choice`, `move_choice`, `set_choice_text`,
+  `set_choice_when`, `set_choice_effects`, `set_choice_labels`, `set_on_enter`); add a mutator only if a step truly
+  needs one. `doc.problems()` is cached on `content_revision` (content edits only).
+- Inspector edits use their own `Edit` enum applied by the pure `inspector::apply_edits` (NOT `EditorAction`):
+  `apply_action` logs `{action:?}`, which would put node text into the debug log. `apply_edits` logs only the KIND of
+  edit (never content). Document this as the second deliberate place edits are applied in CLAUDE.md.
+- Lessons that apply to every GUI spec here: imgui ids come from `NodeKey`/`doc_id`/indices, NEVER from text, labels
+  or dirty state (tab ids are `###doc{doc_id}`); keep workspace locks short and never across imgui/rfd calls; log
+  events only (never per frame, never document text); GUI shortcuts are gated on `!want_text_input`; new windows are
+  covered by `want_capture_mouse` automatically (the graph input ignores clicks over imgui windows).
+- Existing GUI pieces to reuse: `scenes/editor/nodes.rs` (Nodes window), `modals.rs` (+ `Workspace` modal flags),
+  `context_menu.rs`, `display_viewport(ui)`, `actions::apply_action`, `graph::{center…}` helpers (`center_on` is new in
+  step 3), the status data (path, dirty, problems, node count, camera zoom) all live in the model.
+
 ## Policies (verbatim from 00-overview.md — obey them)
 
 - **COMMIT POLICY:** small, meaningful commits. After a verified step, stage exactly its files
@@ -36,7 +55,7 @@ must be unit-tested.
 
 ### 1a — Node fields
 **Executor:** vibe. **Scope:** `src/scenes/editor/inspector/{mod,node_fields}.rs`, `src/scenes/editor/gui.rs`,
-`src/model/doc.rs` (only missing mutators), `tests/inspector_edits.rs`. **Acceptance:** `just check`; Claude runs
+`src/model/doc.rs` (only missing mutators), `CLAUDE.md`, tests as `#[cfg(test)]` modules in the new files. **Acceptance:** `just check`; Claude runs
 the app: select a node, edit its id (links keep pointing at it; the graph header updates), speaker, text, labels,
 "Set as start". **Suggested message:** `Add inspector panel with node id, speaker, text and labels`
 
