@@ -141,6 +141,10 @@ All acceptance commands are `just` recipes (run from the repo root):
   position is its top-left. Edges are bezier entities at the source pin (control points relative to it) with one
   arrowhead `GraphPart` child (`arrowhead_points`, pure + tested); `RewriteEdge` assigns position/shape only when
   different. Logs `projection: N nodes, M edges` at debug on plans that change anything.
+- Children of graph entities (node parts, the edge arrowhead) must be spawned WITH a `GlobalTransform2D`
+  (`child_global(parent_world, local)` in `projection.rs`): the engine's `propagate_transforms` inserts it via
+  deferred Commands, so without it a freshly spawned child renders one frame at its raw local offset (near world
+  origin). Root entities (node roots, the edge itself) must NOT get one — their own `WorldPosition` is world-space.
 
 ## Graph camera system (plan 03 step 3)
 

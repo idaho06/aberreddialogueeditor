@@ -8,6 +8,7 @@
 //! is dropped. When doc id, revision and font-metrics readiness are unchanged since the last
 //! tick, the system returns without even snapshotting.
 
+use aberredengine::core::components::global_transform2d::GlobalTransform2D;
 use aberredengine::core::resources::font_metrics::{FontMetricsStore, FontMetricsWarnCache};
 use aberredengine::prelude::*;
 use rustc_hash::FxHashMap;
@@ -44,6 +45,18 @@ fn edge_color(selected_source: bool) -> Color {
         EDGE_SELECTED_COLOR
     } else {
         EDGE_COLOR
+    }
+}
+
+/// The `GlobalTransform2D` to spawn a child WITH: the engine's `propagate_transforms` inserts this
+/// component via deferred Commands ("visible next frame"), so a freshly spawned child would
+/// otherwise render its first frame at its raw local `WorldPosition` (near world origin).
+/// `parent_world` is the parent's world position, `local` the child's local offset.
+fn child_global(parent_world: Vec2, local: Vec2) -> GlobalTransform2D {
+    GlobalTransform2D {
+        position: parent_world + local,
+        rotation_degrees: 0.0,
+        scale: Vec2::ONE,
     }
 }
 
@@ -223,6 +236,7 @@ fn spawn_node(
         GraphPart,
         ChildOf(root),
         WorldPosition::from_vec(Vec2::ZERO),
+        child_global(view.pos, Vec2::ZERO),
         ZIndex(Z_NODE_BODY),
         body,
     ));
@@ -230,6 +244,7 @@ fn spawn_node(
         GraphPart,
         ChildOf(root),
         WorldPosition::from_vec(Vec2::ZERO),
+        child_global(view.pos, Vec2::ZERO),
         ZIndex(Z_HEADER),
         Shape::rect(Vec2::new(NODE_W, HEADER_H), visual.header_color).filled(),
     ));
@@ -239,6 +254,7 @@ fn spawn_node(
                 GraphPart,
                 ChildOf(root),
                 WorldPosition::from_vec(text.local),
+                child_global(view.pos, text.local),
                 ZIndex(Z_TEXT),
                 DynamicText::new(text.text.clone(), FONT, FONT_SIZE, text.color),
             ));
@@ -251,6 +267,7 @@ fn spawn_node(
             GraphPart,
             ChildOf(root),
             WorldPosition::from_vec(pin.local),
+            child_global(view.pos, pin.local),
             ZIndex(Z_PIN),
             Shape::circle(PIN_R, pin.color).filled(),
         ));
@@ -287,6 +304,7 @@ fn spawn_edge(commands: &mut Commands, ents: &mut GraphEntities, ev: &EdgeView) 
             GraphPart,
             ChildOf(entity),
             WorldPosition::from_vec(Vec2::ZERO),
+            child_global(ev.from, Vec2::ZERO),
             ZIndex(Z_ARROWHEAD),
             Shape::polygon(&arrowhead_points(c2, to_rel), color).filled(),
         ))
@@ -343,6 +361,17 @@ mod tests {
 
     fn close(a: Vec2, b: Vec2) -> bool {
         a.abs_diff_eq(b, 1e-5)
+    }
+
+    #[test]
+    fn child_global_composes_parent_world_and_local_offset() {
+        let g = child_global(Vec2::new(120.0, -45.0), Vec2::new(8.0, 24.0));
+        assert!(close(g.position, Vec2::new(128.0, -21.0)));
+        assert_eq!(g.rotation_degrees, 0.0);
+        assert_eq!(g.scale, Vec2::ONE);
+        // A child at local ZERO sits exactly at the parent's world position.
+        let g0 = child_global(Vec2::new(120.0, -45.0), Vec2::ZERO);
+        assert!(close(g0.position, Vec2::new(120.0, -45.0)));
     }
 
     #[test]
