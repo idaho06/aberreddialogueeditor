@@ -43,3 +43,17 @@ All acceptance commands are `just` recipes (run from the repo root):
 - Engine imports go through `aberredengine::prelude::{...}`; use `aberredengine::core::...` only for items the
   prelude lacks (e.g. `events::window::WindowResized`, `resources::input_bindings::InputBindings`).
   Do not add `bevy_ecs` as a dependency — the facade re-exports it.
+
+## Model and lint
+
+- `src/model` is pure: plain data and functions, no imgui/ECS/window. Its only engine imports are
+  `aberredengine::prelude::{DialogueDef, NodeDef, ChoiceDef, DialogueCondition, DialogueCmp, DialogueEffect,
+  DialogueTree, DialogueError, Vec2}`.
+- Every mutation on `DialogueDoc` goes through a named mutator that bumps `revision` and sets `dirty`;
+  `set_node_pos`, `select` and `mark_clean` only bump `revision` (view-only, never saved).
+- `from_def`/`to_def` convert to/from the engine's `DialogueDef`, and only at load/save.
+- `lint::lint` reports ALL problems of a doc (cached per `revision` via `DialogueDoc::problems`);
+  `lint::engine_gate` (`DialogueTree::try_from(to_def(doc))`) is the save gate — engine rules are never
+  reimplemented in the model.
+- Tests live in `#[cfg(test)]` modules inside the source files: this is a binary crate, so `tests/`
+  cannot import its modules (fixtures load via `include_str!(concat!(env!("CARGO_MANIFEST_DIR"), ...))`).

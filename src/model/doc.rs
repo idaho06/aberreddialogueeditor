@@ -8,6 +8,8 @@ use std::path::{Path, PathBuf};
 
 use aberredengine::prelude::{DialogueCondition, DialogueEffect, Vec2};
 
+use crate::model::lint::{Problem, lint};
+
 /// Stable identifier of an [`EdNode`] within its doc. Keys are never reused: [`DialogueDoc::fresh_key`]
 /// only moves `next_key` forward.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, PartialOrd, Ord)]
@@ -109,6 +111,9 @@ pub struct DialogueDoc {
     pub camera: CamState,
     pub load_warnings: Vec<String>,
     pub next_key: u64,
+    /// Cached [`lint`] result for `revision`: `None` until the first [`DialogueDoc::problems`]
+    /// call, then `(revision, problems)`; recomputed only when `revision` differs.
+    pub lint_cache: Option<(u64, Vec<Problem>)>,
 }
 
 impl DialogueDoc {
@@ -356,6 +361,24 @@ impl DialogueDoc {
     pub fn mark_clean(&mut self) {
         self.dirty = false;
         self.bump_view();
+    }
+
+    /// The doc's current lint problems, cached per `revision`: recomputed only when `revision`
+    /// changed since the last call. A fresh doc (`revision == 0`, cache `None`) computes on the
+    /// first call.
+    pub fn problems(&mut self) -> &[Problem] {
+        let stale = self
+            .lint_cache
+            .as_ref()
+            .is_none_or(|(cached, _)| *cached != self.revision);
+        if stale {
+            let problems = lint(self);
+            self.lint_cache = Some((self.revision, problems));
+        }
+        let Some((_, problems)) = &self.lint_cache else {
+            unreachable!("the lint cache was populated above");
+        };
+        problems
     }
 
     fn choice_mut(&mut self, key: NodeKey, index: usize) -> Option<&mut EdChoice> {
