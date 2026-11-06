@@ -11,40 +11,36 @@ use aberredengine::prelude::Vec2;
 
 use crate::graph::geometry::node_height;
 use crate::graph::style::{COL_GAP, NODE_W, ROW_GAP};
-use crate::model::{DialogueDoc, EdNode, Link, NodeKey, Outputs};
+use crate::model::{DialogueDoc, EdChoice, EdNode, Link, NodeKey, Outputs};
 
 /// Outgoing `Link::Node` targets of `node` in slot order (the `next` slot, then the choices).
-fn node_targets(node: &EdNode) -> Vec<NodeKey> {
-    match &node.out {
-        Outputs::Next(Link::Node(target)) => vec![*target],
-        Outputs::Next(_) => Vec::new(),
-        Outputs::Choices(choices) => choices
-            .iter()
-            .filter_map(|choice| match choice.target {
-                Link::Node(target) => Some(target),
-                _ => None,
-            })
-            .collect(),
-    }
+fn node_targets(node: &EdNode) -> impl Iterator<Item = NodeKey> + '_ {
+    let (next, choices): (Option<NodeKey>, &[EdChoice]) = match &node.out {
+        Outputs::Next(Link::Node(target)) => (Some(*target), &[]),
+        Outputs::Next(_) => (None, &[]),
+        Outputs::Choices(choices) => (None, choices),
+    };
+    next.into_iter()
+        .chain(choices.iter().filter_map(|choice| match choice.target {
+            Link::Node(target) => Some(target),
+            _ => None,
+        }))
 }
 
-/// BFS from `seed` (assigned layer `seed_layer`), extending `depth` and `layers`. A node that
-/// already has a depth is skipped, so back edges (target depth <= source depth), cycles and
-/// self-loops never reassign anything.
+/// BFS from `seed`, which is assigned the next free layer (`layers.len()` at entry), extending
+/// `depth` and `layers`. A node that already has a depth is skipped, so back edges (target
+/// depth <= source depth), cycles and self-loops never reassign anything.
 fn bfs(
     adjacency: &[Vec<usize>],
     depth: &mut [Option<usize>],
     layers: &mut Vec<Vec<usize>>,
     seed: usize,
-    seed_layer: usize,
 ) {
     let mut queue = VecDeque::from([seed]);
-    depth[seed] = Some(seed_layer);
+    depth[seed] = Some(layers.len());
     while let Some(node) = queue.pop_front() {
         let layer = depth[node].expect("queued nodes have a depth");
-        while layers.len() <= layer {
-            layers.push(Vec::new());
-        }
+        layers.resize_with(layer + 1, Vec::new);
         layers[layer].push(node);
         for &target in &adjacency[node] {
             if depth[target].is_none() {
@@ -79,6 +75,13 @@ fn barycenter(
     }
 }
 
+/// Records each node's index within its layer as its current ordering position.
+fn assign_positions(layer: &[usize], position: &mut [usize]) {
+    for (p, &node) in layer.iter().enumerate() {
+        position[node] = p;
+    }
+}
+
 /// Layered left-to-right auto-layout of `doc`:
 ///
 /// a) a node's layer is its BFS shortest-path depth from `doc.start` (back edges are ignored
@@ -109,7 +112,6 @@ pub fn auto_layout(doc: &mut DialogueDoc) {
         .iter()
         .map(|node| {
             node_targets(node)
-                .into_iter()
                 .filter_map(|key| index_of.get(&key).copied())
                 .collect()
         })
@@ -125,12 +127,11 @@ pub fn auto_layout(doc: &mut DialogueDoc) {
     let mut depth: Vec<Option<usize>> = vec![None; node_count];
     let mut layers: Vec<Vec<usize>> = Vec::new();
     if let Some(start) = doc.start.and_then(|key| index_of.get(&key).copied()) {
-        bfs(&adjacency, &mut depth, &mut layers, start, 0);
+        bfs(&adjacency, &mut depth, &mut layers, start);
     }
     for node in 0..node_count {
         if depth[node].is_none() {
-            let seed_layer = layers.len();
-            bfs(&adjacency, &mut depth, &mut layers, node, seed_layer);
+            bfs(&adjacency, &mut depth, &mut layers, node);
         }
     }
 
@@ -139,12 +140,10 @@ pub fn auto_layout(doc: &mut DialogueDoc) {
         layer.sort_unstable();
     }
     let mut position: Vec<usize> = vec![0; node_count];
+    for layer in &layers {
+        assign_positions(layer, &mut position);
+    }
     for _ in 0..2 {
-        for layer in &layers {
-            for (p, &node) in layer.iter().enumerate() {
-                position[node] = p;
-            }
-        }
         for (layer_index, layer) in layers.iter_mut().enumerate().skip(1) {
             let mut keyed: Vec<(f32, usize)> = layer
                 .iter()
@@ -155,27 +154,19 @@ pub fn auto_layout(doc: &mut DialogueDoc) {
                     )
                 })
                 .collect();
-            keyed.sort_by(|a, b| {
-                a.0.partial_cmp(&b.0)
-                    .unwrap_or(std::cmp::Ordering::Equal)
-                    .then_with(|| a.1.cmp(&b.1))
-            });
+            keyed.sort_by(|a, b| a.0.total_cmp(&b.0).then(a.1.cmp(&b.1)));
             *layer = keyed.into_iter().map(|(_, node)| node).collect();
-            for (p, &node) in layer.iter().enumerate() {
-                position[node] = p;
-            }
+            assign_positions(layer, &mut position);
         }
     }
 
     // c) Columns at layer * (NODE_W + COL_GAP), each layer centred on y = 0.
     let column_width = NODE_W + COL_GAP;
+    let heights: Vec<f32> = doc.nodes.iter().map(node_height).collect();
     let layer_heights: Vec<f32> = layers
         .iter()
         .map(|layer| {
-            layer
-                .iter()
-                .map(|&node| node_height(&doc.nodes[node]))
-                .sum::<f32>()
+            layer.iter().map(|&node| heights[node]).sum::<f32>()
                 + ROW_GAP * layer.len().saturating_sub(1) as f32
         })
         .collect();
@@ -184,9 +175,8 @@ pub fn auto_layout(doc: &mut DialogueDoc) {
         let mut y = -layer_heights[layer_index] / 2.0;
         for &node in layer {
             let key = doc.nodes[node].key;
-            let height = node_height(&doc.nodes[node]);
             doc.set_node_pos(key, Vec2::new(x, y));
-            y += height + ROW_GAP;
+            y += heights[node] + ROW_GAP;
         }
     }
     log::debug!("auto_layout: {node_count} nodes in {} layers", layers.len());
@@ -195,23 +185,8 @@ pub fn auto_layout(doc: &mut DialogueDoc) {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::graph::fixtures::{GUARD, LOOPS, doc_from};
     use crate::graph::geometry::node_rect;
-    use crate::model::from_def;
-    use aberredengine::prelude::DialogueDef;
-
-    const GUARD: &str = include_str!(concat!(
-        env!("CARGO_MANIFEST_DIR"),
-        "/tests/fixtures/guard.json"
-    ));
-    const LOOPS: &str = include_str!(concat!(
-        env!("CARGO_MANIFEST_DIR"),
-        "/tests/fixtures/loops.json"
-    ));
-
-    fn doc_from(json: &str) -> DialogueDoc {
-        let def: DialogueDef = serde_json::from_str(json).expect("fixture must parse");
-        from_def(&def)
-    }
 
     fn guard_doc() -> DialogueDoc {
         doc_from(GUARD)

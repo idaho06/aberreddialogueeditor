@@ -10,6 +10,9 @@ use crate::model::CamState;
 pub const MIN_ZOOM: f32 = 0.1;
 pub const MAX_ZOOM: f32 = 4.0;
 
+/// Zoom cap for [`frame_all`]: small graphs are not magnified.
+const MAX_FRAME_ZOOM: f32 = 1.0;
+
 /// World point shown at screen pixel `p`.
 pub fn screen_to_world(cam: &CamState, viewport: Vec2, p: Vec2) -> Vec2 {
     (p - viewport / 2.0) / cam.zoom + cam.target
@@ -38,30 +41,29 @@ pub fn pan_by_screen_delta(cam: &CamState, delta_screen: Vec2) -> CamState {
     }
 }
 
+/// Zoom ratio that fits `size` world units into `avail` pixels; a zero-size axis never
+/// constrains the zoom.
+fn fit_ratio(avail: f32, size: f32) -> f32 {
+    if size > 0.0 {
+        avail / size
+    } else {
+        f32::INFINITY
+    }
+}
+
 /// Camera that fits `bounds` (world `(min, max)`) into the viewport with `margin_px` of padding
-/// on every side, centred on the bounds. Zoom is clamped to `[MIN_ZOOM, 1.0]` so small graphs
-/// are not magnified. `None` (empty doc) yields target `Vec2::ZERO`, zoom `1.0`.
+/// on every side, centred on the bounds. Zoom is clamped to `[MIN_ZOOM, MAX_FRAME_ZOOM]` so
+/// small graphs are not magnified. `None` (empty doc) yields the default camera.
 pub fn frame_all(bounds: Option<(Vec2, Vec2)>, viewport: Vec2, margin_px: f32) -> CamState {
     let Some((min, max)) = bounds else {
-        return CamState {
-            target: Vec2::ZERO,
-            zoom: 1.0,
-        };
+        return CamState::default();
     };
     let centre = (min + max) / 2.0;
     let size = max - min;
     let avail = viewport - Vec2::splat(margin_px * 2.0);
-    let zoom_x = if size.x > 0.0 {
-        avail.x / size.x
-    } else {
-        f32::INFINITY
-    };
-    let zoom_y = if size.y > 0.0 {
-        avail.y / size.y
-    } else {
-        f32::INFINITY
-    };
-    let zoom = zoom_x.min(zoom_y).clamp(MIN_ZOOM, 1.0);
+    let zoom = fit_ratio(avail.x, size.x)
+        .min(fit_ratio(avail.y, size.y))
+        .clamp(MIN_ZOOM, MAX_FRAME_ZOOM);
     CamState {
         target: centre,
         zoom,

@@ -3,7 +3,9 @@
 
 use aberredengine::prelude::Vec2;
 
-use crate::graph::style::{HEADER_H, NODE_W, ROW_H, TEXT_AREA_H};
+use crate::graph::style::{
+    EDGE_FORWARD_DX, EDGE_LOOP_DX, EDGE_MIN_CTRL_DX, HEADER_H, NODE_W, ROW_H, TEXT_AREA_H,
+};
 use crate::model::{DialogueDoc, EdNode, NodeKey, Outputs, Slot};
 
 /// Number of output rows a node has: one per choice, or one for a `Next` node.
@@ -48,18 +50,22 @@ pub enum Hit {
     Empty,
 }
 
+/// The output `Slot` of row `i`: `Slot::Next` for a `Next` node, else `Slot::Choice(i)`.
+fn slot_at(node: &EdNode, i: usize) -> Slot {
+    match &node.out {
+        Outputs::Next(_) => Slot::Next,
+        Outputs::Choices(_) => Slot::Choice(i),
+    }
+}
+
 /// Hit test at world point `p`. Pins take priority over bodies (they are drawn above them);
 /// among overlapping nodes the one LATER in `doc.nodes` order wins (it is drawn on top).
 /// `pin_hit_radius` is the pin click radius (callers pass `PIN_R + 4` scaled by `1/zoom`).
 pub fn hit_test(doc: &DialogueDoc, p: Vec2, pin_hit_radius: f32) -> Hit {
     for node in doc.nodes.iter().rev() {
         for i in 0..rows(node) {
-            let slot = match &node.out {
-                Outputs::Next(_) => Slot::Next,
-                Outputs::Choices(_) => Slot::Choice(i),
-            };
             if (output_pin(node, i) - p).length() <= pin_hit_radius {
-                return Hit::OutputPin(node.key, slot);
+                return Hit::OutputPin(node.key, slot_at(node, i));
             }
         }
         if (input_pin(node) - p).length() <= pin_hit_radius {
@@ -80,15 +86,14 @@ pub fn hit_test(doc: &DialogueDoc, p: Vec2, pin_hit_radius: f32) -> Hit {
 /// leaves horizontally; back/self case loops below both pins.
 pub fn edge_curve(from: Vec2, to: Vec2) -> (Vec2, Vec2, Vec2) {
     let to_rel = to - from;
-    if to.x >= from.x + 20.0 {
-        let dx = 60.0_f32.max((to.x - from.x) / 2.0);
-        let c1 = Vec2::new(dx, 0.0);
-        let c2 = to_rel - Vec2::new(dx, 0.0);
-        (c1, c2, to_rel)
+    if to.x >= from.x + EDGE_FORWARD_DX {
+        let dx = EDGE_MIN_CTRL_DX.max((to.x - from.x) / 2.0);
+        let ctrl = Vec2::new(dx, 0.0);
+        (ctrl, to_rel - ctrl, to_rel)
     } else {
-        let h = 80.0 + (to.y - from.y).abs() / 2.0;
-        let c1 = Vec2::new(80.0, h);
-        let c2 = to_rel + Vec2::new(-80.0, h);
+        let h = EDGE_LOOP_DX + (to.y - from.y).abs() / 2.0;
+        let c1 = Vec2::new(EDGE_LOOP_DX, h);
+        let c2 = to_rel + Vec2::new(-EDGE_LOOP_DX, h);
         (c1, c2, to_rel)
     }
 }
@@ -107,32 +112,21 @@ pub fn arrow_tip_dir(c2_rel: Vec2, to_rel: Vec2) -> Vec2 {
 
 /// Union of all node rects as `(min, max)`; `None` when the doc has no nodes.
 pub fn graph_bounds(doc: &DialogueDoc) -> Option<(Vec2, Vec2)> {
-    let mut iter = doc.nodes.iter();
-    let (mut min, mut max) = node_rect(iter.next()?);
-    for node in iter {
-        let (nmin, nmax) = node_rect(node);
-        min = min.min(nmin);
-        max = max.max(nmax);
-    }
-    Some((min, max))
+    doc.nodes
+        .iter()
+        .map(node_rect)
+        .reduce(|(amin, amax), (bmin, bmax)| (amin.min(bmin), amax.max(bmax)))
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::model::from_def;
-    use aberredengine::prelude::DialogueDef;
-
-    const GUARD: &str = include_str!(concat!(
-        env!("CARGO_MANIFEST_DIR"),
-        "/tests/fixtures/guard.json"
-    ));
+    use crate::graph::fixtures::{GUARD, doc_from};
 
     /// guard.json: keys are 1-based in node order — greet(1, 3 choices), friend(2, Next(End)),
     /// pass(3, Next(friend)).
     fn guard_doc() -> DialogueDoc {
-        let def: DialogueDef = serde_json::from_str(GUARD).expect("fixture must parse");
-        from_def(&def)
+        doc_from(GUARD)
     }
 
     fn close(a: Vec2, b: Vec2) -> bool {

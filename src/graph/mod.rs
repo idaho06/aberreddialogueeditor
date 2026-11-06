@@ -1,6 +1,6 @@
-//! Pure graph-view logic: style constants, node geometry/hit testing, text wrap and camera
-//! math. No ECS, no imgui — the only engine import is `Vec2` from the prelude. Projection,
-//! layout and interaction land in later plan steps.
+//! Pure graph-view logic: style constants, node geometry/hit testing, text wrap, camera math
+//! and layered auto-layout. No ECS, no imgui — the only engine import is `Vec2` from the
+//! prelude. Projection and interaction land in later plan steps.
 #![allow(dead_code, unused_imports)] // consumed by later plan steps
 
 mod camera;
@@ -22,3 +22,25 @@ pub use style::{
     PAD, PIN_R, ROW_GAP, ROW_H, TEXT_AREA_H, TEXT_MAX_LINES,
 };
 pub use wrap::{fit_line, wrap_text};
+
+#[cfg(test)]
+pub(crate) mod fixtures {
+    //! JSON fixtures shared by the graph test modules.
+    use aberredengine::prelude::DialogueDef;
+
+    use crate::model::{DialogueDoc, from_def};
+
+    pub const GUARD: &str = include_str!(concat!(
+        env!("CARGO_MANIFEST_DIR"),
+        "/tests/fixtures/guard.json"
+    ));
+    pub const LOOPS: &str = include_str!(concat!(
+        env!("CARGO_MANIFEST_DIR"),
+        "/tests/fixtures/loops.json"
+    ));
+
+    pub fn doc_from(json: &str) -> DialogueDoc {
+        let def: DialogueDef = serde_json::from_str(json).expect("fixture must parse");
+        from_def(&def)
+    }
+}

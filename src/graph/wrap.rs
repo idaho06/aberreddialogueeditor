@@ -36,22 +36,20 @@ pub fn wrap_text(
                 let chars: Vec<char> = word.chars().collect();
                 let mut start = 0;
                 while start < chars.len() {
-                    let mut end = chars.len();
-                    while end > start
-                        && measure(&chars[start..end].iter().collect::<String>()) > max_width
-                    {
-                        end -= 1;
+                    // Longest prefix of chars[start..] that fits; a single char is emitted
+                    // even when it alone is too wide.
+                    let mut chunk: String = chars[start..].iter().collect();
+                    let mut len = chars.len() - start;
+                    while len > 1 && measure(&chunk) > max_width {
+                        chunk.pop();
+                        len -= 1;
                     }
-                    if end == start {
-                        end = start + 1; // a single char wider than max_width is emitted anyway
-                    }
-                    let chunk: String = chars[start..end].iter().collect();
-                    if end < chars.len() {
+                    if start + len < chars.len() {
                         lines.push(chunk);
                     } else {
                         current = chunk;
                     }
-                    start = end;
+                    start += len;
                 }
             } else if current.is_empty() {
                 current = word.to_owned();
@@ -90,17 +88,19 @@ pub fn fit_line(text: &str, max_width: f32, measure: &dyn Fn(&str) -> f32) -> St
 /// Drops trailing `char`s from `text` until `text + "..."` fits `max_width`, then appends
 /// `"..."`. If even the bare ellipsis does not fit, it is returned alone.
 fn truncate_with_ellipsis(text: &str, max_width: f32, measure: &dyn Fn(&str) -> f32) -> String {
-    let chars: Vec<char> = text.chars().collect();
-    let mut keep = chars.len();
-    while keep > 0 {
-        let mut candidate: String = chars[..keep].iter().collect();
+    let mut candidate = String::with_capacity(text.len() + ELLIPSIS.len());
+    candidate.push_str(text);
+    candidate.push_str(ELLIPSIS);
+    while candidate.len() > ELLIPSIS.len() && measure(&candidate) > max_width {
+        let text_end = candidate.len() - ELLIPSIS.len();
+        let last = candidate[..text_end]
+            .chars()
+            .next_back()
+            .expect("text part is non-empty");
+        candidate.truncate(text_end - last.len_utf8());
         candidate.push_str(ELLIPSIS);
-        if measure(&candidate) <= max_width {
-            return candidate;
-        }
-        keep -= 1;
     }
-    ELLIPSIS.to_owned()
+    candidate
 }
 
 #[cfg(test)]
