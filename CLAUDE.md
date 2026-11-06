@@ -53,8 +53,11 @@ All acceptance commands are `just` recipes (run from the repo root):
   `set_node_pos`, `select` and `mark_clean` only bump `revision` (view-only, never saved), and
   `set_camera` bumps nothing at all — like the other view-only mutators it never sets `dirty`, and it
   must not invalidate the lint cache or trigger a projection (the camera is pure view state).
+- Two revision counters: `revision` is bumped by EVERY mutator (it is the graph-projection key), while
+  `content_revision` is bumped only by content mutators — the lint cache (`DialogueDoc::problems`) is
+  keyed on `content_revision`, so dragging/selecting/camera moves never re-run the linter.
 - `from_def`/`to_def` convert to/from the engine's `DialogueDef`, and only at load/save.
-- `lint::lint` reports ALL problems of a doc (cached per `revision` via `DialogueDoc::problems`);
+- `lint::lint` reports ALL problems of a doc (cached per `content_revision` via `DialogueDoc::problems`);
   `lint::engine_gate` (`DialogueTree::try_from(to_def(doc))`) is the save gate — engine rules are never
   reimplemented in the model.
 - Tests live in `#[cfg(test)]` modules inside the source files: this is a binary crate, so `tests/`
@@ -95,7 +98,7 @@ All acceptance commands are `just` recipes (run from the repo root):
 - What is logged where: file operations and outcomes in `ops`, dialog requests/results/notifications in
   `systems/file_dialogs.rs`, the inserted shared handles in `systems/setup.rs`, applied/ignored `EditorAction`s
   in `scenes/editor/actions.rs`, modal choices and outcomes in `scenes/editor/modals.rs`, `from_def` load
-  warnings plus summary in `model/convert.rs`, and the lint-cache recompute (revision, error/warning counts)
+  warnings plus summary in `model/convert.rs`, and the lint-cache recompute (content_revision, error/warning counts)
   in `model/doc.rs`.
 - Never log document content: no node text, speaker text or whole file contents.
 

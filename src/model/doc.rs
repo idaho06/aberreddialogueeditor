@@ -1,8 +1,8 @@
 //! One open dialogue document and the [`Workspace`] that holds all of them.
 //!
 //! [`DialogueDoc`] is the single source of truth for a tab. There is deliberately no public `&mut EdNode`
-//! accessor: every change goes through a named mutator so `revision`/`dirty` bookkeeping stays in one
-//! place. Pure queries (`node`, field reads) never touch `revision`/`dirty`.
+//! accessor: every change goes through a named mutator so `revision`/`content_revision`/`dirty`
+//! bookkeeping stays in one place. Pure queries (`node`, field reads) never touch `revision`/`dirty`.
 
 use std::path::{Path, PathBuf};
 
@@ -102,6 +102,11 @@ impl Default for CamState {
 /// [`DialogueDoc::set_camera`], which bumps nothing at all: the camera is pure view state, so it must
 /// not invalidate the lint cache or trigger a projection. A call that cannot apply (unknown key,
 /// inapplicable slot) is a no-op and does not bump. Pure queries never bump.
+///
+/// Two revision counters: `revision` is bumped by EVERY mutator and is the graph-projection key;
+/// `content_revision` is bumped only by content mutators (the private `bump`), never by the view-only
+/// ones or `set_camera` — the lint cache is keyed on it, because lint depends only on node content,
+/// never on positions, selection or camera.
 #[derive(Debug, Clone, PartialEq, Default)]
 pub struct DialogueDoc {
     /// Unique id of this doc within its [`Workspace`] (assigned by [`Workspace::add_doc`],
@@ -113,12 +118,17 @@ pub struct DialogueDoc {
     pub path: Option<PathBuf>,
     pub dirty: bool,
     pub revision: u64,
+    /// Content-only revision: incremented only by content mutators (the private `bump`), never by
+    /// `bump_view` (view-only changes) and never by [`DialogueDoc::set_camera`]. The lint cache is
+    /// keyed on this — lint depends only on node content, never on pos/selection/camera.
+    pub content_revision: u64,
     pub selected: Option<NodeKey>,
     pub camera: CamState,
     pub load_warnings: Vec<String>,
     pub next_key: u64,
-    /// Cached [`lint`] result for `revision`: `None` until the first [`DialogueDoc::problems`]
-    /// call, then `(revision, problems)`; recomputed only when `revision` differs.
+    /// Cached [`lint`] result for `content_revision`: `None` until the first [`DialogueDoc::problems`]
+    /// call, then `(content_revision, problems)`; recomputed only when `content_revision` differs
+    /// (view-only changes never invalidate it).
     pub lint_cache: Option<(u64, Vec<Problem>)>,
 }
 
@@ -205,7 +215,8 @@ impl DialogueDoc {
         self.bump();
     }
 
-    /// Moves the node on the canvas. Bumps `revision` but NOT `dirty`: positions are never saved.
+    /// Moves the node on the canvas. Bumps `revision` but NOT `dirty` or `content_revision`
+    /// (positions are never saved and never affect lint).
     pub fn set_node_pos(&mut self, key: NodeKey, pos: Vec2) {
         match self.nodes.iter_mut().find(|n| n.key == key) {
             Some(node) => node.pos = pos,
@@ -357,7 +368,8 @@ impl DialogueDoc {
         self.bump();
     }
 
-    /// Selects a node (or clears the selection). Bumps `revision` but NOT `dirty`.
+    /// Selects a node (or clears the selection). Bumps `revision` but NOT `dirty` or
+    /// `content_revision`.
     pub fn select(&mut self, key: Option<NodeKey>) {
         self.selected = key;
         self.bump_view();
@@ -370,20 +382,21 @@ impl DialogueDoc {
     }
 
     /// Sets the graph-view camera. View-only like [`DialogueDoc::set_node_pos`]/[`select`], but bumps
-    /// NOTHING — not even `revision`: the camera is view state, so the lint cache stays valid and no
-    /// projection is triggered.
+    /// NOTHING — not even `revision` or `content_revision`: the camera is view state, so the lint
+    /// cache stays valid and no projection is triggered.
     pub fn set_camera(&mut self, camera: CamState) {
         self.camera = camera;
     }
 
-    /// The doc's current lint problems, cached per `revision`: recomputed only when `revision`
-    /// changed since the last call. A fresh doc (`revision == 0`, cache `None`) computes on the
-    /// first call.
+    /// The doc's current lint problems, cached per `content_revision`: recomputed only when
+    /// `content_revision` changed since the last call — view-only changes (position, selection,
+    /// camera) never trigger a recompute. A fresh doc (`content_revision == 0`, cache `None`)
+    /// computes on the first call.
     pub fn problems(&mut self) -> &[Problem] {
         let stale = self
             .lint_cache
             .as_ref()
-            .is_none_or(|(cached, _)| *cached != self.revision);
+            .is_none_or(|(cached, _)| *cached != self.content_revision);
         if stale {
             let problems = lint(self);
             let errors = problems
@@ -391,11 +404,11 @@ impl DialogueDoc {
                 .filter(|p| p.severity == Severity::Error)
                 .count();
             log::debug!(
-                "lint cache recomputed: revision={}, {errors} errors, {} warnings",
-                self.revision,
+                "lint cache recomputed: content_revision={}, {errors} errors, {} warnings",
+                self.content_revision,
                 problems.len() - errors
             );
-            self.lint_cache = Some((self.revision, problems));
+            self.lint_cache = Some((self.content_revision, problems));
         }
         self.lint_cache
             .as_ref()
@@ -410,13 +423,15 @@ impl DialogueDoc {
         }
     }
 
-    /// Content change: `revision += 1`, `dirty = true`.
+    /// Content change: `revision += 1`, `content_revision += 1`, `dirty = true`.
     fn bump(&mut self) {
         self.revision += 1;
+        self.content_revision += 1;
         self.dirty = true;
     }
 
-    /// View-only change: `revision += 1`, `dirty` untouched.
+    /// View-only change: `revision += 1` only; `content_revision` (the lint-cache key) and
+    /// `dirty` stay untouched.
     fn bump_view(&mut self) {
         self.revision += 1;
     }
@@ -512,6 +527,7 @@ impl Workspace {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::model::lint::ProblemKind;
     use aberredengine::prelude::{DialogueCondition, DialogueEffect};
 
     /// A doc with `a --next--> b`, `b` having one choice ("go", target End), start = a, clean.
@@ -531,6 +547,21 @@ mod tests {
             Outputs::Choices(v) => v.iter().map(|c| c.text.as_str()).collect(),
             Outputs::Next(_) => panic!("expected choices"),
         }
+    }
+
+    /// Test-only: appends a sentinel to the cached problem list so a recompute is detectable
+    /// (a recompute replaces the whole vector, a cache hit keeps the sentinel).
+    fn poison_lint_cache(doc: &mut DialogueDoc) {
+        let (_, problems) = doc
+            .lint_cache
+            .as_mut()
+            .expect("the lint cache must exist after problems()");
+        problems.push(Problem {
+            severity: Severity::Warning,
+            kind: ProblemKind::Unreachable,
+            node: None,
+            message: "poisoned".to_owned(),
+        });
     }
 
     #[test]
@@ -738,9 +769,119 @@ mod tests {
     }
 
     #[test]
+    fn view_only_mutators_keep_the_lint_cache_and_content_revision_untouched() {
+        let (mut doc, a, b) = base_doc();
+        let _ = doc.problems(); // fill the lint cache
+        poison_lint_cache(&mut doc); // so a recompute is detectable
+        let cached = doc.lint_cache.clone();
+        let revision = doc.revision;
+        let content_revision = doc.content_revision;
+        assert!(!doc.dirty, "base doc is clean");
+
+        // set_node_pos and select still bump `revision` (the projection key) ...
+        doc.set_node_pos(a, Vec2::new(42.0, 7.0));
+        assert_eq!(
+            doc.revision,
+            revision + 1,
+            "set_node_pos still bumps revision"
+        );
+        doc.select(Some(b));
+        assert_eq!(doc.revision, revision + 2, "select still bumps revision");
+        // ... and mark_clean too (it clears dirty via bump_view) ...
+        doc.mark_clean();
+        assert_eq!(
+            doc.revision,
+            revision + 3,
+            "mark_clean still bumps revision"
+        );
+        assert!(!doc.dirty);
+        // ... while set_camera bumps nothing at all.
+        doc.set_camera(CamState {
+            target: Vec2::new(9.0, 9.0),
+            zoom: 1.5,
+        });
+        assert_eq!(
+            doc.revision,
+            revision + 3,
+            "set_camera must not bump revision"
+        );
+
+        assert_eq!(
+            doc.content_revision, content_revision,
+            "view-only changes must never bump content_revision"
+        );
+        assert_eq!(doc.lint_cache, cached, "the cache tuple is untouched");
+        let problems = doc.problems();
+        assert!(
+            problems.iter().any(|p| p.message == "poisoned"),
+            "problems() must NOT recompute after view-only changes"
+        );
+        assert_eq!(doc.lint_cache, cached, "the cache tuple is still untouched");
+    }
+
+    #[test]
+    fn content_mutators_bump_both_revisions_set_dirty_and_recompute_the_lint_cache() {
+        type Mutator = fn(&mut DialogueDoc, NodeKey, NodeKey);
+        let cases: Vec<(&str, Mutator)> = vec![
+            ("set_text", |d, a, _| d.set_text(a, "changed".to_owned())),
+            ("set_link", |d, a, _| d.set_link(a, Slot::Next, Link::End)),
+            ("add_node", |d, _, _| {
+                d.add_node(Vec2::new(3.0, 3.0));
+            }),
+            ("delete_node", |d, _, b| d.delete_node(b)),
+        ];
+        for (name, op) in cases {
+            let (mut doc, a, b) = base_doc();
+            let _ = doc.problems(); // fill the lint cache
+            poison_lint_cache(&mut doc); // so a recompute is detectable
+            let revision = doc.revision;
+            let content_revision = doc.content_revision;
+            assert!(!doc.dirty, "{name}: base doc is clean");
+            op(&mut doc, a, b);
+            assert_eq!(doc.revision, revision + 1, "{name}: revision bumps");
+            assert_eq!(
+                doc.content_revision,
+                content_revision + 1,
+                "{name}: content_revision bumps"
+            );
+            assert!(doc.dirty, "{name}: dirty is set");
+            let problems = doc.problems();
+            assert!(
+                !problems.iter().any(|p| p.message == "poisoned"),
+                "{name}: problems() must recompute after a content change"
+            );
+            assert_eq!(
+                doc.lint_cache.as_ref().map(|(key, _)| *key),
+                Some(doc.content_revision),
+                "{name}: the cache is keyed on the new content_revision"
+            );
+        }
+    }
+
+    #[test]
+    fn lint_results_after_a_view_only_change_match_a_fresh_lint() {
+        let (mut doc, a, b) = base_doc();
+        let before = doc.problems().to_vec();
+        doc.set_node_pos(a, Vec2::new(100.0, -50.0));
+        doc.select(Some(b));
+        doc.set_camera(CamState {
+            target: Vec2::new(1.0, 2.0),
+            zoom: 0.5,
+        });
+        doc.mark_clean();
+        let after = doc.problems().to_vec();
+        assert_eq!(
+            after, before,
+            "view-only changes cannot change lint results"
+        );
+        assert_eq!(after, lint(&doc), "cached results equal a fresh lint(&doc)");
+    }
+
+    #[test]
     fn mutators_on_unknown_keys_are_no_ops() {
         let (mut doc, _a, _b) = base_doc();
         let revision = doc.revision;
+        let content_revision = doc.content_revision;
         let ghost = NodeKey(999);
         doc.delete_node(ghost);
         doc.set_start(ghost);
@@ -760,6 +901,10 @@ mod tests {
         doc.set_choice_effects(ghost, 0, vec![]);
         doc.set_choice_labels(ghost, 0, vec![]);
         assert_eq!(doc.revision, revision, "no-op calls must not bump revision");
+        assert_eq!(
+            doc.content_revision, content_revision,
+            "no-op calls must not bump content_revision"
+        );
     }
 
     #[test]

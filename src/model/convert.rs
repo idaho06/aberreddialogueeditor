@@ -13,7 +13,8 @@ use crate::model::doc::{DialogueDoc, EdChoice, EdNode, Link, NodeKey, Outputs};
 
 /// Builds a doc from an engine def. Keys are assigned sequentially (1-based) in node order; duplicate
 /// ids resolve to the FIRST node with that id. All positions are `Vec2::ZERO`; `dirty = false`,
-/// `revision = 0`.
+/// `revision = 0`, `content_revision = 0` (built without mutators, so the first `problems()` call
+/// computes the lint).
 pub fn from_def(def: &DialogueDef) -> DialogueDoc {
     let mut doc = DialogueDoc::new_empty();
 
@@ -222,6 +223,7 @@ mod tests {
         );
         assert!(!doc.dirty);
         assert_eq!(doc.revision, 0);
+        assert_eq!(doc.content_revision, 0);
         assert_eq!(doc.nodes.len(), 3);
         assert!(doc.nodes.iter().all(|n| n.pos == Vec2::ZERO));
         assert_eq!(to_def(&doc), def, "to_def(from_def(def)) == def");

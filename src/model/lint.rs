@@ -238,8 +238,8 @@ mod tests {
         of_kind(problems, kind).next().is_none()
     }
 
-    /// The revision stored in the lint cache, if any.
-    fn cached_revision(doc: &DialogueDoc) -> Option<u64> {
+    /// The `content_revision` stored in the lint cache, if any.
+    fn cached_content_revision(doc: &DialogueDoc) -> Option<u64> {
         doc.lint_cache.as_ref().map(|(rev, _)| *rev)
     }
 
@@ -551,10 +551,11 @@ mod tests {
     }
 
     #[test]
-    fn problems_cache_computes_on_first_call_and_recomputes_only_on_revision_change() {
-        // A fresh doc (revision 0) still computes on the first call.
+    fn problems_cache_computes_on_first_call_and_recomputes_only_on_content_revision_change() {
+        // A fresh doc (content_revision 0) still computes on the first call.
         let mut fresh = DialogueDoc::new_empty();
         assert_eq!(fresh.revision, 0);
+        assert_eq!(fresh.content_revision, 0);
         assert_eq!(fresh.lint_cache, None);
         let problems = fresh.problems();
         assert!(
@@ -562,33 +563,47 @@ mod tests {
             "a fresh doc computes its lint on the first call: {problems:?}"
         );
         assert_eq!(
-            cached_revision(&fresh),
+            cached_content_revision(&fresh),
             Some(0),
-            "the cache is stored at revision 0"
+            "the cache is stored at content_revision 0"
         );
 
         let (mut doc, a, _b) = base_doc();
         let first = doc.problems().to_vec();
-        assert_eq!(cached_revision(&doc), Some(doc.revision));
+        assert_eq!(cached_content_revision(&doc), Some(doc.content_revision));
 
-        // Unchanged revision: the cached vector survives (even a poisoned one).
+        // Unchanged content_revision: the cached vector survives (even a poisoned one).
         poison_cache(&mut doc);
+        // A view-only change bumps `revision` but NOT `content_revision`: still no recompute.
+        let revision = doc.revision;
+        let content_revision = doc.content_revision;
+        doc.set_node_pos(a, Vec2::new(5.0, 5.0));
+        assert_eq!(doc.revision, revision + 1, "set_node_pos bumps revision");
+        assert_eq!(
+            doc.content_revision, content_revision,
+            "set_node_pos must not bump content_revision"
+        );
         let again = doc.problems();
         assert_eq!(
             again.len(),
             first.len() + 1,
-            "the cache is returned unchanged when the revision did not change"
+            "the cache is returned unchanged when content_revision did not change (view-only included)"
         );
         assert!(again.iter().any(|p| p.message == "poisoned"));
 
-        // A mutator bumps the revision: the cache is recomputed.
+        // A content mutator bumps content_revision: the cache is recomputed.
         doc.set_text(a, "changed".to_owned());
         let recomputed = doc.problems();
         assert_eq!(
             recomputed,
             &first[..],
-            "after a revision bump the cache is replaced (text does not affect lint)"
+            "after a content_revision bump the cache is replaced (text does not affect lint)"
         );
         assert!(!recomputed.iter().any(|p| p.message == "poisoned"));
+        assert_eq!(
+            cached_content_revision(&doc),
+            Some(doc.content_revision),
+            "the cache is keyed on the new content_revision"
+        );
     }
 }
