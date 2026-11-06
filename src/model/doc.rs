@@ -72,7 +72,7 @@ pub struct EdNode {
 }
 
 /// Which output slot of a node [`DialogueDoc::set_link`] addresses.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub enum Slot {
     Next,
     Choice(usize),
@@ -102,6 +102,10 @@ impl Default for CamState {
 /// apply (unknown key, inapplicable slot) is a no-op and does not bump. Pure queries never bump.
 #[derive(Debug, Clone, PartialEq, Default)]
 pub struct DialogueDoc {
+    /// Unique id of this doc within its [`Workspace`] (assigned by [`Workspace::add_doc`],
+    /// starting at 1). `0` for a doc that was never added to a workspace; the graph projection
+    /// treats `doc_id == 0` with no content as "nothing shown".
+    pub doc_id: u64,
     pub nodes: Vec<EdNode>,
     pub start: Option<NodeKey>,
     pub path: Option<PathBuf>,
@@ -434,6 +438,8 @@ fn clear_link(link: &mut Link, deleted: NodeKey) {
 pub struct Workspace {
     pub docs: Vec<DialogueDoc>,
     pub active: usize,
+    /// Allocator for [`DialogueDoc::doc_id`]: the next id `add_doc` assigns (ids start at 1).
+    pub next_doc_id: u64,
     /// Error-modal queue for the GUI: each entry is one modal message (failed open/save, engine
     /// save-gate rejections, ...). The GUI drains it.
     pub notifications: Vec<String>,
@@ -453,8 +459,10 @@ impl Workspace {
         self.docs.get_mut(self.active)
     }
 
-    /// Appends a doc and makes it active.
-    pub fn add_doc(&mut self, doc: DialogueDoc) {
+    /// Appends a doc, assigns it the next unique `doc_id` (starting at 1) and makes it active.
+    pub fn add_doc(&mut self, mut doc: DialogueDoc) {
+        self.next_doc_id += 1;
+        doc.doc_id = self.next_doc_id;
         self.docs.push(doc);
         self.active = self.docs.len() - 1;
     }
@@ -742,5 +750,39 @@ mod tests {
         );
         ws.close_doc(0); // out of range: no-op
         assert_eq!(ws.docs.len(), 0);
+    }
+
+    #[test]
+    fn slot_is_hashable() {
+        let mut set = std::collections::HashSet::new();
+        set.insert(Slot::Next);
+        set.insert(Slot::Choice(0));
+        set.insert(Slot::Choice(3));
+        assert!(set.contains(&Slot::Next));
+        assert!(set.contains(&Slot::Choice(0)));
+        assert!(!set.contains(&Slot::Choice(1)));
+        assert_eq!(set.len(), 3);
+    }
+
+    #[test]
+    fn add_doc_assigns_unique_doc_ids_starting_at_1() {
+        assert_eq!(
+            DialogueDoc::new_empty().doc_id,
+            0,
+            "a bare doc has no id yet"
+        );
+        let mut ws = Workspace::default();
+        ws.add_doc(DialogueDoc::new_empty());
+        ws.add_doc(DialogueDoc::new_empty());
+        ws.add_doc(DialogueDoc::new_empty());
+        assert_eq!(ws.docs[0].doc_id, 1);
+        assert_eq!(ws.docs[1].doc_id, 2);
+        assert_eq!(ws.docs[2].doc_id, 3);
+        let ids: std::collections::HashSet<u64> = ws.docs.iter().map(|d| d.doc_id).collect();
+        assert_eq!(ids.len(), 3, "doc ids are unique per workspace");
+        assert_eq!(ws.next_doc_id, 3);
+        ws.close_doc(1);
+        ws.add_doc(DialogueDoc::new_empty());
+        assert_eq!(ws.docs[2].doc_id, 4, "closed ids are never reused");
     }
 }

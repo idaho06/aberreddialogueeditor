@@ -107,3 +107,16 @@ All acceptance commands are `just` recipes (run from the repo root):
   ignored, unreachable nodes in trailing columns), barycenter ordering with two forward sweeps, columns at
   `layer * (NODE_W + COL_GAP)` with each layer centred on y = 0. It writes via `set_node_pos`, so it bumps
   `revision` but never sets `dirty`; `ops::open_path` runs it on every newly opened doc (never on Focused).
+
+## Graph projection prep (plan 03 step 2a)
+
+- `Slot` derives `Hash`; `DialogueDoc.doc_id` is unique per workspace (`Workspace.next_doc_id`, assigned in
+  `add_doc` starting at 1; a bare doc is 0, and `doc_id == 0` with no content means "nothing shown").
+- `style.rs` now also holds the palette (`Color::new(..)` consts) and the Z constants (`f32` payloads for
+  `ZIndex`: edge 0, arrowhead 1, body 10, header 11, text 12, pin 13, preview 20).
+- `src/graph/components.rs` is the ONLY graph file importing ECS types (`Component`/`Resource`/`Entity` via
+  the prelude, plus `use aberredengine::bevy_ecs;` so the derive macros' `bevy_ecs::..` paths resolve):
+  markers `GraphNode`/`GraphEdge`/`GraphPart`/`GraphPreview` and the `GraphEntities` resource.
+- `describe.rs` (pure) turns an `EdNode` into a `NodeVisual` (texts/pins local to the node top-left);
+  `projection_plan.rs` (pure) snapshots a doc (`snapshot_of`) and diffs it against `Shown`
+  (`plan_projection` -> `ProjOp`s; edges are rewritten, never respawned, when a node moves).
