@@ -89,3 +89,17 @@ All acceptance commands are `just` recipes (run from the repo root):
   warnings plus summary in `model/convert.rs`, and the lint-cache recompute (revision, error/warning counts)
   in `model/doc.rs`.
 - Never log document content: no node text, speaker text or whole file contents.
+
+## Graph (pure)
+
+- `src/graph` is pure logic — no ECS/imgui, only `Vec2` from the engine prelude; module-level
+  `#![allow(dead_code)]` until the projection/input steps consume it. `style.rs` holds the numeric
+  constants (node/pin/row/gap sizes, edge/outline metrics, `FONT`); colours and Z come later.
+- `geometry.rs`: `rows`/`node_height`/`node_rect`, `input_pin`/`output_pin`, `hit_test` (pins beat
+  bodies, later node in `doc.nodes` wins), `edge_curve` (control points RELATIVE to the source pin,
+  endpoint `to - from`), `arrow_tip_dir`, `graph_bounds`. `wrap.rs`: char-safe greedy `wrap_text`
+  with `"..."` truncation via a `measure` callback, plus `fit_line`. `camera.rs`:
+  `screen_to_world`/`world_to_screen`, `zoom_at` (clamp [0.1, 4.0]), `pan_by_screen_delta`,
+  `frame_all` (zoom clamped to [0.1, 1.0], `None` -> ZERO/1.0).
+- Graph tests are `#[cfg(test)]` modules in each file; fixtures load via
+  `include_str!(concat!(env!("CARGO_MANIFEST_DIR"), "/tests/fixtures/guard.json"))`.
