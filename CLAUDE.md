@@ -244,7 +244,7 @@ All acceptance commands are `just` recipes (run from the repo root):
   (`ModalChoice::ControlsOk`). Choice application is factored into the pure `apply_choice_ws(&mut Workspace, choice)` —
   `apply_choice` only locks, calls it and dispatches the returned `ChoiceEffect` (quit / Save As dialog) after the lock drops.
 
-## Inspector (plan 04 step 1a)
+## Inspector (plan 04 steps 1a/1b)
 
 - `src/scenes/editor/inspector/mod.rs` draws the "Inspector" window (a plain imgui window; position/size set only on
   first use, top-right) showing the SELECTED node of the ACTIVE doc — "Nothing selected" (disabled text) without a
@@ -261,5 +261,38 @@ All acceptance commands are `just` recipes (run from the repo root):
   drop them). The lock is never held across widget calls.
 - Widget ids come from the NodeKey, never from the text: the whole panel body is wrapped in a `push_id` keyed by the
   NodeKey and each label row pushes its index, so typing never changes a widget id (the input keeps focus).
-- Outputs and on-enter effects are read-only placeholder lines in this step ("Outputs: next" / "Outputs: choices (N)",
-  "On enter effects: N"); no outputs/choices/conditions/effects editing yet.
+- Outputs are edited in the inspector (step 1b below); on-enter effects are still a read-only
+  placeholder line ("On enter effects: N"); no condition/effect editors yet.
+
+### Inspector step 1b — outputs and choices
+
+- `src/scenes/editor/inspector/outputs.rs` draws the outputs editor (called from
+  `node_fields::draw` in place of the old read-only "Outputs:" line); the inspector snapshot now
+  also carries `targets`: the `(key, id)` of every node of the doc in node order, cloned under
+  the same short lock and passed down for the target combos.
+- Mode switching: two radio buttons "Next"/"Choices" emit `Edit::ChangeMode(key, OutputsMode)`.
+  `apply_edits` converts purely (`change_mode`): Next -> Choices builds exactly ONE empty choice
+  whose target INHERITS the current next link (a Dangling one included); Choices -> Next keeps
+  the FIRST choice's target (End if none) and drops the choices (no confirmation, no undo); a
+  ChangeMode to the current mode is a no-op (no bump). No edit path can ever leave
+  `Outputs::Choices(vec![])` (deleting the last choice goes through `Next(End)`; `AddChoice` on a
+  Next node converts ChangeMode-style so the next link is not lost).
+- Next mode shows one "Next" target combo; Choices mode lists one collapsing section per choice
+  labelled `"Choice N: <truncated text>###choice{i}"` — the visible part may change with the text
+  but the imgui id is ONLY the `###choice{i}` part (typing never changes the widget id, so the
+  section stays open and the input keeps focus); each choice is wrapped in `push_id_usize(i)`
+  and holds a text input, a target combo, the shared labels editor, Up/Down/Delete buttons
+  (Up disabled on the first, Down on the last) and the read-only "When: (none)/set" +
+  "Effects: N" placeholders; a "[+ Add choice]" button ends the list.
+- Target combos: the pure `combo_entries(nodes)` builds "(end)" (`Link::End`) first, then every
+  node by id; duplicate ids (or an empty id) get `"{id} (#{n})"` with the 1-based node-order
+  position (`"(empty id) (#{n})"` for an empty id). `target_combo` shows the current entry's
+  label as preview, or `"unknown: {s}"` in RED (a `Text` style colour pushed around the combo)
+  for a `Link::Dangling(s)`, while the dropdown still lists the normal entries; selecting a
+  different entry yields the new `Link`.
+- The new `Edit` variants (`ChangeMode`/`SetLink`/`AddChoice`/`DeleteChoice`/`MoveChoice`/
+  `SetChoiceText`/`SetChoiceLabels`) go through the existing model mutators (only
+  `ChangeMode`/`AddChoice`-on-Next use `set_outputs`); edits for a vanished node or an
+  out-of-range choice index are ignored (no panic, no bump). Logging stays kind + node key +
+  indices only: `trace!` for the per-keystroke kinds (`SetChoiceText`/`SetChoiceLabels`),
+  `debug!` for the structural ones (`ChangeMode`/`SetLink`/`AddChoice`/`DeleteChoice`/`MoveChoice`).

@@ -8,8 +8,8 @@
 
 use aberredengine::prelude::imgui::Ui;
 
-use super::Edit;
-use crate::model::{EdNode, NodeKey, Outputs};
+use super::{Edit, outputs};
+use crate::model::{EdNode, NodeKey};
 
 /// Lint-derived flags of the node being edited, computed in the snapshot.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
@@ -26,9 +26,10 @@ pub struct NodeFlags {
 const RED: [f32; 4] = [1.0, 0.35, 0.35, 1.0];
 
 /// Draws the node-field widgets for `node` and returns the edits the widgets requested (empty
-/// when nothing changed this frame). Local `String` copies feed the input widgets, so the
-/// snapshot stays immutable while drawing.
-pub fn draw(ui: &Ui, node: &EdNode, flags: &NodeFlags) -> Vec<Edit> {
+/// when nothing changed this frame). `targets` is the doc's `(key, id)` list in node order, for
+/// the outputs' target combos. Local `String` copies feed the input widgets, so the snapshot
+/// stays immutable while drawing.
+pub fn draw(ui: &Ui, node: &EdNode, flags: &NodeFlags, targets: &[(NodeKey, String)]) -> Vec<Edit> {
     let key = node.key;
     let mut edits = Vec::new();
 
@@ -77,24 +78,24 @@ pub fn draw(ui: &Ui, node: &EdNode, flags: &NodeFlags) -> Vec<Edit> {
     }
 
     // Labels.
-    edits.extend(labels_editor(ui, key, &node.labels));
+    if let Some(labels) = labels_editor(ui, "labels", &node.labels) {
+        edits.push(Edit::SetLabels(key, labels));
+    }
 
-    // Read-only placeholders for the next steps.
+    // Outputs (next link / choices); on-enter effects stay a read-only placeholder for now.
     ui.separator();
     ui.text(format!("On enter effects: {}", node.on_enter.len()));
-    let outputs = match &node.out {
-        Outputs::Next(_) => "next".to_owned(),
-        Outputs::Choices(choices) => format!("choices ({})", choices.len()),
-    };
-    ui.text(format!("Outputs: {outputs}"));
+    edits.extend(outputs::draw(ui, node, targets));
 
     edits
 }
 
 /// The labels list: one single-line input per label with a "[-]" button on the same row (row ids
-/// come from the index, never the text), plus a "[+ Add label]" button. Every change emits one
-/// `SetLabels` with the whole new vector.
-fn labels_editor(ui: &Ui, key: NodeKey, labels: &[String]) -> Vec<Edit> {
+/// come from the index, never the text), plus a "[+ Add label]" button. `id` scopes the widget
+/// ids (fixed string, so node labels and choice labels never collide). Returns `Some(new)` when
+/// anything changed, `None` otherwise.
+pub(super) fn labels_editor(ui: &Ui, id: &str, labels: &[String]) -> Option<Vec<String>> {
+    let _scope = ui.push_id(id);
     let mut labels = labels.to_vec();
     let mut changed = false;
     let mut remove = None;
@@ -118,9 +119,5 @@ fn labels_editor(ui: &Ui, key: NodeKey, labels: &[String]) -> Vec<Edit> {
         labels.push(String::new());
         changed = true;
     }
-    if changed {
-        vec![Edit::SetLabels(key, labels)]
-    } else {
-        Vec::new()
-    }
+    changed.then_some(labels)
 }
