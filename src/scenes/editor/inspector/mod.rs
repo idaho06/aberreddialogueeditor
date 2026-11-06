@@ -1,6 +1,6 @@
 //! The "Inspector" window: shows the SELECTED node of the ACTIVE doc and edits its fields (id,
-//! speaker, text, labels, start, outputs/choices). On-enter effects are a read-only placeholder
-//! for the next step.
+//! speaker, text, labels, start, outputs/choices incl. each choice's `when` condition and
+//! `effects`, and the node's on-enter effects).
 //!
 //! Locking (the standard panel pattern): the workspace is locked only to snapshot the selected
 //! node (a clone), its [`NodeFlags`] and the doc's `doc_id`, and again to apply the collected
@@ -11,6 +11,8 @@
 //! `actions::apply_action`: that logs `{action:?}`, and the edit payloads carry node content,
 //! which must never reach the log. [`apply_edits`] logs only the edit KIND and the node key.
 
+mod effects;
+mod expr;
 mod node_fields;
 mod outputs;
 
@@ -61,6 +63,12 @@ pub enum Edit {
     SetChoiceText(NodeKey, usize, String),
     /// Replace the whole labels vector of choice `index`.
     SetChoiceLabels(NodeKey, usize, Vec<String>),
+    /// Replace the whole `when` condition of choice `index` (`None` clears it).
+    SetChoiceWhen(NodeKey, usize, Option<DialogueCondition>),
+    /// Replace the whole effects list of choice `index` (an empty Vec clears it).
+    SetChoiceEffects(NodeKey, usize, Vec<DialogueEffect>),
+    /// Replace the node's whole on-enter effects list (an empty Vec clears it).
+    SetOnEnter(NodeKey, Vec<DialogueEffect>),
 }
 
 /// The pure mode-switch conversion: `None` when the node already is in `mode` (a no-op — no
@@ -162,6 +170,20 @@ pub fn apply_edits(doc: &mut DialogueDoc, edits: &[Edit]) {
             Edit::SetChoiceLabels(key, index, labels) => {
                 log::trace!("edit SetChoiceLabels: node={} choice={index}", key.0);
                 doc.set_choice_labels(*key, *index, labels.clone());
+            }
+            Edit::SetChoiceWhen(key, index, when) => {
+                // Per-keystroke kind: trace, kind + node key + index only, never the condition.
+                log::trace!("edit SetChoiceWhen: node={} choice={index}", key.0);
+                doc.set_choice_when(*key, *index, when.clone());
+            }
+            Edit::SetChoiceEffects(key, index, effects) => {
+                // Per-keystroke kind: trace, kind + node key + index only, never the effects.
+                log::trace!("edit SetChoiceEffects: node={} choice={index}", key.0);
+                doc.set_choice_effects(*key, *index, effects.clone());
+            }
+            Edit::SetOnEnter(key, effects) => {
+                log::trace!("edit SetOnEnter: node={}", key.0);
+                doc.set_on_enter(*key, effects.clone());
             }
         }
     }
@@ -277,7 +299,7 @@ pub fn draw(ctx: &mut GuiCtx) {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::model::{Link, Outputs, Slot, from_def, to_def};
+    use crate::model::{Link, Outputs, Slot, engine_gate, from_def, to_def};
     use aberredengine::prelude::{DialogueDef, Vec2};
 
     const GUARD: &str = include_str!(concat!(
@@ -975,6 +997,163 @@ mod tests {
             to_def(&doc),
             before,
             "the round trip reproduces the original def"
+        );
+    }
+
+    /// The 3-level nested condition used by the when/effects tests:
+    /// `all(any(flag, not(integer)), string_equals)`.
+    fn nested_when() -> DialogueCondition {
+        DialogueCondition::all(vec![
+            DialogueCondition::any(vec![
+                DialogueCondition::flag("has_pass"),
+                DialogueCondition::not(DialogueCondition::integer("gold", DialogueCmp::Ge, 10)),
+            ]),
+            DialogueCondition::string_equals("name", "guard"),
+        ])
+    }
+
+    /// One effect of every kind.
+    fn all_effect_kinds() -> Vec<DialogueEffect> {
+        vec![
+            DialogueEffect::set_flag("f"),
+            DialogueEffect::remove_flag("g"),
+            DialogueEffect::set_integer("i", 5),
+            DialogueEffect::add_integer("i", -2),
+            DialogueEffect::set_scalar("x", 0.5),
+            DialogueEffect::set_string("s", "v"),
+        ]
+    }
+
+    #[test]
+    fn set_choice_when_effects_and_on_enter_replace_whole_values_and_bump_like_content_edits() {
+        let (mut doc, a, _b) = choices_doc();
+        let revision = doc.revision;
+        let content_revision = doc.content_revision;
+        assert!(!doc.dirty, "the base doc is clean");
+        let when = Some(nested_when());
+        let effects = all_effect_kinds();
+        let on_enter = vec![
+            DialogueEffect::set_flag("entered"),
+            DialogueEffect::add_integer("visits", 1),
+        ];
+        apply_edits(
+            &mut doc,
+            &[
+                Edit::SetChoiceWhen(a, 0, when.clone()),
+                Edit::SetChoiceEffects(a, 0, effects.clone()),
+                Edit::SetOnEnter(a, on_enter.clone()),
+            ],
+        );
+        match &doc.node(a).expect("node exists").out {
+            Outputs::Choices(v) => {
+                assert_eq!(v[0].when, when, "the whole when value is replaced");
+                assert_eq!(v[0].effects, effects, "the whole effects list is replaced");
+                assert!(v[1].when.is_none(), "the other choice is untouched");
+                assert!(v[1].effects.is_empty(), "the other choice is untouched");
+            }
+            Outputs::Next(_) => panic!("expected choices"),
+        }
+        assert_eq!(doc.node(a).unwrap().on_enter, on_enter);
+        assert_eq!(doc.revision, revision + 3, "one bump per applied edit");
+        assert_eq!(doc.content_revision, content_revision + 3);
+        assert!(doc.dirty, "dirty is set");
+    }
+
+    #[test]
+    fn set_choice_when_none_clears_the_condition_and_empty_vecs_clear_the_lists() {
+        let (mut doc, a, _b) = choices_doc();
+        apply_edits(
+            &mut doc,
+            &[
+                Edit::SetChoiceWhen(a, 1, Some(DialogueCondition::flag("f"))),
+                Edit::SetChoiceEffects(a, 1, vec![DialogueEffect::set_flag("g")]),
+                Edit::SetOnEnter(a, vec![DialogueEffect::set_integer("i", 1)]),
+            ],
+        );
+        apply_edits(
+            &mut doc,
+            &[
+                Edit::SetChoiceWhen(a, 1, None),
+                Edit::SetChoiceEffects(a, 1, Vec::new()),
+                Edit::SetOnEnter(a, Vec::new()),
+            ],
+        );
+        match &doc.node(a).expect("node exists").out {
+            Outputs::Choices(v) => {
+                assert_eq!(v[1].when, None, "None clears the condition");
+                assert!(v[1].effects.is_empty(), "an empty Vec clears the effects");
+            }
+            Outputs::Next(_) => panic!("expected choices"),
+        }
+        assert!(
+            doc.node(a).unwrap().on_enter.is_empty(),
+            "empty Vec clears on_enter"
+        );
+    }
+
+    #[test]
+    fn when_effects_on_enter_edits_for_a_vanished_node_or_out_of_range_index_are_ignored() {
+        let (mut doc, a, _b) = choices_doc();
+        let ghost = NodeKey(999);
+        let revision = doc.revision;
+        let content_revision = doc.content_revision;
+        assert!(!doc.dirty);
+        apply_edits(
+            &mut doc,
+            &[
+                Edit::SetChoiceWhen(ghost, 0, Some(DialogueCondition::flag("f"))),
+                Edit::SetChoiceEffects(ghost, 0, all_effect_kinds()),
+                Edit::SetOnEnter(ghost, vec![DialogueEffect::set_flag("f")]),
+                // Valid node, out-of-range choice indices.
+                Edit::SetChoiceWhen(a, 99, Some(DialogueCondition::flag("f"))),
+                Edit::SetChoiceEffects(a, 99, vec![DialogueEffect::set_flag("g")]),
+            ],
+        );
+        assert_eq!(doc.revision, revision, "no bump");
+        assert_eq!(doc.content_revision, content_revision, "no content bump");
+        assert!(!doc.dirty, "not dirty");
+        match &doc.node(a).expect("node exists").out {
+            Outputs::Choices(v) => {
+                assert!(v.iter().all(|c| c.when.is_none() && c.effects.is_empty()));
+            }
+            Outputs::Next(_) => panic!("expected choices"),
+        }
+        assert!(doc.node(a).unwrap().on_enter.is_empty());
+        assert!(doc.node(ghost).is_none());
+    }
+
+    #[test]
+    fn save_path_doc_with_nested_condition_all_effect_kinds_and_on_enter_gate_round_trip() {
+        let (mut doc, a, _b) = choices_doc();
+        apply_edits(
+            &mut doc,
+            &[
+                Edit::SetChoiceWhen(a, 0, Some(nested_when())),
+                Edit::SetChoiceEffects(a, 0, all_effect_kinds()),
+                Edit::SetOnEnter(
+                    a,
+                    vec![
+                        DialogueEffect::set_flag("entered"),
+                        DialogueEffect::add_integer("visits", 1),
+                    ],
+                ),
+            ],
+        );
+        // The save gate accepts the doc.
+        assert!(
+            engine_gate(&doc).is_ok(),
+            "engine_gate accepts the edited doc: {:?}",
+            engine_gate(&doc).err()
+        );
+        // to_def -> pretty JSON -> from_str reproduces the def exactly.
+        let def = to_def(&doc);
+        let json = serde_json::to_string_pretty(&def).expect("the def serialises");
+        let back: DialogueDef = serde_json::from_str(&json).expect("the saved JSON parses");
+        assert_eq!(back, def, "the JSON round trip reproduces the def exactly");
+        // And the engine builds a tree from the saved def.
+        assert!(
+            DialogueTree::try_from(back).is_ok(),
+            "DialogueTree::try_from accepts the saved def"
         );
     }
 }

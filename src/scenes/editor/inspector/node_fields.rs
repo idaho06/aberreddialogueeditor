@@ -6,9 +6,9 @@
 //! NodeKey) and from row indices — never from the edited text, so typing never changes an id and
 //! the focused input never loses focus.
 
-use aberredengine::prelude::imgui::Ui;
+use aberredengine::prelude::imgui::{TreeNodeFlags, Ui};
 
-use super::{Edit, outputs};
+use super::{Edit, effects, outputs};
 use crate::model::{EdNode, NodeKey};
 
 /// Lint-derived flags of the node being edited, computed in the snapshot.
@@ -82,9 +82,21 @@ pub fn draw(ui: &Ui, node: &EdNode, flags: &NodeFlags, targets: &[(NodeKey, Stri
         edits.push(Edit::SetLabels(key, labels));
     }
 
-    // Outputs (next link / choices); on-enter effects stay a read-only placeholder for now.
+    // On-enter effects: a collapsing section containing the effects editor on a LOCAL clone;
+    // a change emits the whole new Vec<DialogueEffect>. The imgui id is ONLY the fixed
+    // "###onenter" part — the visible count may change, the id must not.
     ui.separator();
-    ui.text(format!("On enter effects: {}", node.on_enter.len()));
+    if ui.collapsing_header(
+        format!("On enter effects ({})###onenter", node.on_enter.len()),
+        TreeNodeFlags::DEFAULT_OPEN,
+    ) {
+        ui.indent();
+        let mut on_enter = node.on_enter.clone();
+        if effects::effects_editor(ui, &mut on_enter) {
+            edits.push(Edit::SetOnEnter(key, on_enter));
+        }
+        ui.unindent();
+    }
     edits.extend(outputs::draw(ui, node, targets));
 
     edits

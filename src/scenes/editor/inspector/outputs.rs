@@ -14,7 +14,7 @@ use std::collections::HashMap;
 use aberredengine::prelude::imgui::{StyleColor, TreeNodeFlags, Ui};
 
 use super::node_fields::labels_editor;
-use super::{Edit, OutputsMode};
+use super::{Edit, OutputsMode, effects, expr};
 use crate::model::{EdNode, Link, NodeKey, Outputs, Slot};
 
 /// Red note colour for a dangling target's combo preview.
@@ -89,13 +89,25 @@ pub fn draw(ui: &Ui, node: &EdNode, targets: &[(NodeKey, String)]) -> Vec<Edit> 
                     if ui.small_button("Delete") {
                         edits.push(Edit::DeleteChoice(key, i));
                     }
-                    // Read-only placeholders for the next step (conditions/effects).
-                    ui.text(if choice.when.is_some() {
-                        "When: set"
-                    } else {
-                        "When: (none)"
-                    });
-                    ui.text(format!("Effects: {}", choice.effects.len()));
+                    // When: the optional-condition editor (a "When" checkbox + nested editor)
+                    // on a LOCAL clone; a change emits the whole new Option<DialogueCondition>.
+                    let mut when = choice.when.clone();
+                    if expr::optional_condition_editor(ui, &mut when) {
+                        edits.push(Edit::SetChoiceWhen(key, i, when));
+                    }
+                    // Effects: a collapsing sub-section. The imgui id is ONLY the fixed
+                    // "###effects" part — the visible count may change, the id must not.
+                    if ui.collapsing_header(
+                        format!("Effects ({})###effects", choice.effects.len()),
+                        TreeNodeFlags::DEFAULT_OPEN,
+                    ) {
+                        ui.indent();
+                        let mut new_effects = choice.effects.clone();
+                        if effects::effects_editor(ui, &mut new_effects) {
+                            edits.push(Edit::SetChoiceEffects(key, i, new_effects));
+                        }
+                        ui.unindent();
+                    }
                     ui.unindent();
                 }
             }

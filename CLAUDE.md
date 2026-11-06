@@ -261,8 +261,8 @@ All acceptance commands are `just` recipes (run from the repo root):
   drop them). The lock is never held across widget calls.
 - Widget ids come from the NodeKey, never from the text: the whole panel body is wrapped in a `push_id` keyed by the
   NodeKey and each label row pushes its index, so typing never changes a widget id (the input keeps focus).
-- Outputs are edited in the inspector (step 1b below); on-enter effects are still a read-only
-  placeholder line ("On enter effects: N"); no condition/effect editors yet.
+- Outputs are edited in the inspector (step 1b below), and each choice's `when`/`effects` plus the node's
+  on-enter effects are edited by the condition/effect editors (step 2 below).
 
 ### Inspector step 1b — outputs and choices
 
@@ -296,3 +296,38 @@ All acceptance commands are `just` recipes (run from the repo root):
   out-of-range choice index are ignored (no panic, no bump). Logging stays kind + node key +
   indices only: `trace!` for the per-keystroke kinds (`SetChoiceText`/`SetChoiceLabels`),
   `debug!` for the structural ones (`ChangeMode`/`SetLink`/`AddChoice`/`DeleteChoice`/`MoveChoice`).
+
+### Inspector step 2 — condition and effect editors
+
+- `src/scenes/editor/inspector/expr.rs` holds the recursive condition editor used by every choice's
+  `when` (`optional_condition_editor`: a "When" checkbox that creates an empty `Flag` on check and
+  clears on uncheck, with `condition_editor` below while `Some`) and `effects.rs` holds the effects
+  list editor used by every choice's `effects` and by the node's `on_enter` — the old read-only
+  placeholders are gone. Both editors work on a LOCAL CLONE of the value and return `true` on
+  change; the caller emits ONE whole-value edit (`SetChoiceWhen`/`SetChoiceEffects`/`SetOnEnter`),
+  applied by `apply_edits` through `set_choice_when`/`set_choice_effects`/`set_on_enter`
+  (`trace!` kind + node key + index only, never content; vanished node / out-of-range index ignored,
+  no bump). In `outputs.rs` the Effects sub-section is a collapsing header labelled
+  `format!("Effects ({})###effects", n)` and in `node_fields.rs` `format!("On enter effects ({})###onenter", n)`:
+  the visible count may change, the imgui id (the `###` part) never does.
+- Type switching is the PURE `convert_condition(old, to: CondKind)` / `convert_effect(old, to: EffectKind)`
+  (table-tested for all 6x6 pairs): same kind returns the old unchanged; converting INTO a leaf keeps the
+  key of a leaf source but uses an empty key from a compound source (the Not/All/Any structure is dropped
+  ON PURPOSE when the user picks a leaf type); target `Not` wraps the whole old condition; target
+  `All`/`Any` keep the children (All<->Any verbatim, `Not{cond}` contributes `[*cond]`, a leaf `[old]`,
+  so no work is lost). Effects always keep the key; `SetInteger`<->`AddInteger` keep the i32
+  (value<->delta); every other payload gets its default (0, 0.0, ''). Effects reorder via the pure
+  `move_item` (clamped, no-op out of range).
+- Widget ids never depend on edited text: every condition recursion level and list item and every
+  effects row is wrapped in `ui.push_id_usize(..)` (plus fixed `"##..."` label suffixes and
+  `ui.indent()`/`unindent()` per level; recursion depth is unlimited), and section headers use fixed
+  `###` ids as above.
+- An empty key is allowed (the engine accepts it): it shows a faint red "(empty key)" hint, not an error.
+- Serde shape is pinned by tests: every condition/effect variant the converters and defaults can produce
+  serialises to the engine's internally-tagged snake_case JSON (`{"type":"flag","key":""}`,
+  `{"type":"integer","key":"","op":"eq","value":0}`, `{"type":"not","cond":{...}}`,
+  `{"type":"all","all":[...]}`, `{"type":"set_scalar","key":"","value":0.0}`, ...) and nested conditions
+  round-trip through `serde_json` unchanged; a save-path test builds a doc with a 3-level nested
+  condition, every effect kind and on-enter effects, and checks `engine_gate` is Ok,
+  `to_def` -> `serde_json::to_string_pretty` -> `from_str::<DialogueDef>` equals the def, and
+  `DialogueTree::try_from` of it succeeds.
