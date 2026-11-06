@@ -10,7 +10,7 @@
 
 use aberredengine::prelude::*;
 
-use crate::graph::{frame_doc, screen_to_world};
+use crate::graph::{auto_layout, frame_doc, screen_to_world};
 use crate::model::{NodeKey, Workspace};
 use crate::ops;
 use crate::systems::file_dialogs::{
@@ -37,6 +37,14 @@ pub enum EditorAction {
     /// active doc. `viewport` is the window size in screen pixels, read by the producer from
     /// `ui.io().display_size`.
     FrameAll { viewport: Vec2 },
+    /// View > "Re-layout": re-run the auto-layout on the active doc, then frame all like
+    /// [`EditorAction::FrameAll`]. Positions are view-only, so a clean doc stays clean (and a
+    /// dirty one stays dirty). No-op without an active doc. `viewport` is read by the producer
+    /// from `ui.io().display_size`.
+    Relayout { viewport: Vec2 },
+    /// Help > "Controls": show the controls help modal (workspace-level, works with and without
+    /// an active doc).
+    ShowControls,
     /// Context menu "Add node here": append a node at the given world position and select it.
     /// No-op without an active doc.
     AddNodeAt(Vec2),
@@ -173,6 +181,17 @@ pub fn apply_action(
             if let Some(doc) = ws.active_doc_mut() {
                 frame_doc(doc, viewport);
             }
+        }
+        EditorAction::Relayout { viewport } => {
+            // No active doc: no-op. auto_layout writes positions via set_node_pos (view-only,
+            // never dirty) and frame_doc only sets the camera.
+            if let Some(doc) = ws.active_doc_mut() {
+                auto_layout(doc);
+                frame_doc(doc, viewport);
+            }
+        }
+        EditorAction::ShowControls => {
+            ws.show_controls = true;
         }
         EditorAction::AddNodeAt(world) => add_node_and_select(ws, world),
         EditorAction::AddNode { viewport } => {
@@ -455,6 +474,87 @@ mod tests {
             "FrameAll is view-only: no revision bump"
         );
         assert!(!doc.dirty, "FrameAll does not dirty the doc");
+    }
+
+    #[test]
+    fn relayout_relayouts_and_frames_the_active_doc_view_only_and_no_ops_without_a_doc() {
+        let viewport = Vec2::new(800.0, 600.0);
+        let mut ws = Workspace::default();
+        // No active doc: no-op (no panic, nothing happens).
+        let fx = apply_action(&mut ws, EditorAction::Relayout { viewport }, None);
+        assert!(fx.dialog.is_none() && !fx.quit);
+        assert!(ws.docs.is_empty());
+
+        ops::open_path(&mut ws, &fixture("guard.json")).expect("opens");
+        // Mess up the layout and the camera.
+        let revision = {
+            let doc = ws.active_doc_mut().unwrap();
+            let keys: Vec<NodeKey> = doc.nodes.iter().map(|n| n.key).collect();
+            for (i, key) in keys.iter().enumerate() {
+                doc.set_node_pos(*key, Vec2::new(1000.0 + i as f32 * 10.0, -500.0));
+            }
+            doc.set_camera(CamState {
+                target: Vec2::new(9.0, 9.0),
+                zoom: 3.0,
+            });
+            assert!(!doc.dirty, "set_node_pos/set_camera never dirty");
+            doc.revision
+        };
+        let mut expected = ws.active_doc().unwrap().clone();
+        auto_layout(&mut expected);
+        frame_doc(&mut expected, viewport);
+
+        let fx = apply_action(&mut ws, EditorAction::Relayout { viewport }, None);
+        assert!(fx.dialog.is_none() && !fx.quit);
+        let doc = ws.active_doc().unwrap();
+        let positions = |d: &crate::model::DialogueDoc| {
+            d.nodes.iter().map(|n| (n.key, n.pos)).collect::<Vec<_>>()
+        };
+        assert_eq!(
+            positions(doc),
+            positions(&expected),
+            "positions match a fresh auto_layout of the messed-up doc"
+        );
+        assert_eq!(doc.camera, expected.camera, "the camera matches frame_doc");
+        assert!(!doc.dirty, "re-layout of a clean doc stays clean");
+        assert!(
+            doc.revision > revision,
+            "set_node_pos bumps revision (the projection key)"
+        );
+
+        // A dirty doc stays dirty and is re-laid out the same way.
+        {
+            let doc = ws.active_doc_mut().unwrap();
+            let keys: Vec<NodeKey> = doc.nodes.iter().map(|n| n.key).collect();
+            for (i, key) in keys.iter().enumerate() {
+                doc.set_node_pos(*key, Vec2::new(-2000.0, 700.0 + i as f32));
+            }
+            doc.add_node(Vec2::new(3.0, 3.0)); // content mutation: dirty
+            assert!(doc.dirty);
+        }
+        let mut expected = ws.active_doc().unwrap().clone();
+        auto_layout(&mut expected);
+        frame_doc(&mut expected, viewport);
+        let fx = apply_action(&mut ws, EditorAction::Relayout { viewport }, None);
+        assert!(fx.dialog.is_none() && !fx.quit);
+        let doc = ws.active_doc().unwrap();
+        assert_eq!(positions(doc), positions(&expected));
+        assert_eq!(doc.camera, expected.camera);
+        assert!(doc.dirty, "re-layout keeps a dirty doc dirty");
+    }
+
+    #[test]
+    fn show_controls_sets_the_workspace_flag_with_and_without_a_doc() {
+        let mut ws = Workspace::default();
+        let fx = apply_action(&mut ws, EditorAction::ShowControls, None);
+        assert!(fx.dialog.is_none() && !fx.quit);
+        assert!(ws.show_controls, "workspace-level: works without a doc");
+
+        ws.show_controls = false;
+        ops::open_path(&mut ws, &fixture("guard.json")).expect("opens");
+        let fx = apply_action(&mut ws, EditorAction::ShowControls, None);
+        assert!(fx.dialog.is_none() && !fx.quit);
+        assert!(ws.show_controls, "still works with an active doc");
     }
 
     #[test]

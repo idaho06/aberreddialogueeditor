@@ -481,6 +481,8 @@ pub struct Workspace {
     pub pending_close: Option<usize>,
     /// Set when quit was requested while any doc is dirty; the GUI shows a confirm modal.
     pub pending_quit: bool,
+    /// Set by Help > "Controls"; the GUI shows the controls modal while this is true.
+    pub show_controls: bool,
     /// Pending graph context-menu request (right-click without movement); the GUI consumes it.
     pub pending_context_menu: Option<ContextMenuRequest>,
 }

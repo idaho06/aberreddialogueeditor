@@ -1,6 +1,6 @@
 //! The main menu bar. Menu items produce [`EditorAction`]s (applied later by
-//! [`crate::scenes::editor::gui`]): the File items, Edit > "Add node" (enabled only with an
-//! active doc) and View > "Frame all"; View > "Re-layout" stays a disabled placeholder.
+//! [`crate::scenes::editor::gui`]): the File items, Edit > "Add node", View > "Re-layout" and
+//! "Frame all" (both enabled only with an active doc) and Help > "Controls" (always enabled).
 
 use aberredengine::prelude::imgui::Ui;
 use aberredengine::prelude::*;
@@ -55,12 +55,21 @@ pub fn draw(ctx: &mut GuiCtx, active: Option<usize>, actions: &mut Vec<EditorAct
         }
     });
     ui.menu("View", || {
-        ui.menu_item_config("Re-layout").enabled(false).build();
         // Enabled only with an active doc; the viewport is imgui's display size (== render size).
+        if item(ui, "Re-layout", "", active.is_some()) {
+            actions.push(EditorAction::Relayout {
+                viewport: super::display_viewport(ui),
+            });
+        }
         if item(ui, "Frame all", "F", active.is_some()) {
             actions.push(EditorAction::FrameAll {
                 viewport: super::display_viewport(ui),
             });
+        }
+    });
+    ui.menu("Help", || {
+        if item(ui, "Controls", "", true) {
+            actions.push(EditorAction::ShowControls);
         }
     });
 }

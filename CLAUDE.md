@@ -82,8 +82,8 @@ All acceptance commands are `just` recipes (run from the repo root):
 - Lock discipline: lock `WorkspaceMutex` only for short snapshots and per action, never while calling
   `request_async_dialog`/`dialog_in_flight` or any rfd code; widgets are drawn with the guard dropped.
 - Shortcuts are read with `ui.is_key_pressed(Key::..)` + `io().key_ctrl`/`key_shift`, only when
-  `!io().want_text_input`. Modals (error queue, unsaved-changes close/quit) open from the frame's top-level
-  scope after the menu; one at a time, error modal first. While a native dialog is in flight, tab closes are
+  `!io().want_text_input`. Modals (error queue, unsaved-changes close/quit, Help > Controls) open from the frame's
+  top-level scope after the menu; one at a time, error modal first, the Controls modal last. While a native dialog is in flight, tab closes are
   ignored (a pending Save As is applied by tab index).
 - On the `SET_SELECTED` frame imgui still reports the previously selected tab as selected; `tabs::draw`
   ignores every tab's selected report on that frame (`clicked_focus`) — otherwise the active tab
@@ -221,3 +221,14 @@ All acceptance commands are `just` recipes (run from the repo root):
   pure `items_for(request)` list (node hit -> "Set as start"/"Delete node"/"Add node here", empty -> only "Add node
   here", separator before the last item when more than one) — a click pushes the action and closes the popup, and the
   stored request is cleared once the popup is no longer open.
+
+## Re-layout action and Help > Controls modal (plan 03 step 5)
+
+- View > "Re-layout" is `EditorAction::Relayout { viewport }` (enabled only with an active doc): `apply_action` runs
+  `graph::auto_layout(doc)` then `graph::frame_doc(doc, viewport)` on the active doc and no-ops without one. Positions are
+  view-only (`set_node_pos` never sets `dirty`), so a clean doc stays clean and a dirty doc stays dirty.
+- Help > "Controls" is `EditorAction::ShowControls` (always enabled), setting the workspace-level `Workspace.show_controls`.
+  While it is set and no error/close/quit modal is showing, modals.rs draws `CONTROLS_MODAL` (`"Controls##help"`, lowest
+  priority): the pure `CONTROLS: &[(&str, &str)]` list as two aligned columns, a separator and an OK button
+  (`ModalChoice::ControlsOk`). Choice application is factored into the pure `apply_choice_ws(&mut Workspace, choice)` —
+  `apply_choice` only locks, calls it and dispatches the returned `ChoiceEffect` (quit / Save As dialog) after the lock drops.
