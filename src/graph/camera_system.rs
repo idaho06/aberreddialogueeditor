@@ -154,7 +154,7 @@ pub fn graph_frame_system(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::graph::{MAX_ZOOM, MIN_ZOOM, screen_to_world};
+    use crate::graph::camera::{MAX_ZOOM, MIN_ZOOM, screen_to_world};
 
     fn cam() -> CamState {
         CamState {

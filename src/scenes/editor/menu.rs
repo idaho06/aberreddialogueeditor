@@ -49,9 +49,8 @@ pub fn draw(ctx: &mut GuiCtx, active: Option<usize>, actions: &mut Vec<EditorAct
     ui.menu("Edit", || {
         // Enabled only with an active doc; the viewport is imgui's display size (== render size).
         if item(ui, "Add node", "", active.is_some()) {
-            let size = ui.io().display_size;
             actions.push(EditorAction::AddNode {
-                viewport: Vec2::new(size[0], size[1]),
+                viewport: super::display_viewport(ui),
             });
         }
     });
@@ -59,9 +58,8 @@ pub fn draw(ctx: &mut GuiCtx, active: Option<usize>, actions: &mut Vec<EditorAct
         ui.menu_item_config("Re-layout").enabled(false).build();
         // Enabled only with an active doc; the viewport is imgui's display size (== render size).
         if item(ui, "Frame all", "F", active.is_some()) {
-            let size = ui.io().display_size;
             actions.push(EditorAction::FrameAll {
-                viewport: Vec2::new(size[0], size[1]),
+                viewport: super::display_viewport(ui),
             });
         }
     });

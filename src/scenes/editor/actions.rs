@@ -174,19 +174,14 @@ pub fn apply_action(
                 frame_doc(doc, viewport);
             }
         }
-        EditorAction::AddNodeAt(world) => {
-            // No active doc: no-op.
-            if let Some(doc) = ws.active_doc_mut() {
-                let key = doc.add_node(world);
-                doc.select(Some(key));
-            }
-        }
+        EditorAction::AddNodeAt(world) => add_node_and_select(ws, world),
         EditorAction::AddNode { viewport } => {
             // No active doc: no-op. The screen centre maps to the camera target.
-            if let Some(doc) = ws.active_doc_mut() {
-                let world = screen_to_world(&doc.camera, viewport, viewport / 2.0);
-                let key = doc.add_node(world);
-                doc.select(Some(key));
+            let world = ws
+                .active_doc()
+                .map(|doc| screen_to_world(&doc.camera, viewport, viewport / 2.0));
+            if let Some(world) = world {
+                add_node_and_select(ws, world);
             }
         }
         EditorAction::DeleteNode(key) => {
@@ -218,6 +213,14 @@ pub fn apply_action(
         ws.pending_quit
     );
     fx
+}
+
+/// Appends a node at `world` in the active doc and selects it; no-op without an active doc.
+fn add_node_and_select(ws: &mut Workspace, world: Vec2) {
+    if let Some(doc) = ws.active_doc_mut() {
+        let key = doc.add_node(world);
+        doc.select(Some(key));
+    }
 }
 
 /// Routes a dialog request: straight to the dialog layer when an `AppState` is available,

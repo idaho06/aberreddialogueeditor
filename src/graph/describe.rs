@@ -115,12 +115,13 @@ pub fn describe_node(
     let row_width = NODE_W - 2.0 * PAD - 2.0 * PIN_R - 8.0;
     let row_count = geometry::rows(node);
     for i in 0..row_count {
-        let (raw, color) = match &node.out {
-            Outputs::Choices(_) => (row_text(node, i), TEXT_COLOR),
-            Outputs::Next(_) => (row_text(node, i), DIM_TEXT_COLOR),
+        // Choice rows are normal text; the `next` row of a `Next` node is dim.
+        let color = match &node.out {
+            Outputs::Choices(_) => TEXT_COLOR,
+            Outputs::Next(_) => DIM_TEXT_COLOR,
         };
         texts.push(TextItem {
-            text: fit_line(&raw, row_width, measure),
+            text: fit_line(&row_text(node, i), row_width, measure),
             local: Vec2::new(PAD, HEADER_H + TEXT_AREA_H + i as f32 * ROW_H + 4.0),
             color,
         });

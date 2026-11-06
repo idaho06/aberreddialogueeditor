@@ -61,9 +61,10 @@ pub fn draw(ctx: &mut GuiCtx, actions: &mut Vec<EditorAction>) {
         open = true;
         if let Some(request) = PENDING.with(|pending| pending.get()) {
             let items = items_for(request);
-            let last = items.len().saturating_sub(1);
+            let multi = items.len() > 1;
             for (index, (label, action)) in items.iter().enumerate() {
-                if index == last && items.len() > 1 {
+                // One separator before the last item when there is more than one item.
+                if multi && index + 1 == items.len() {
                     ui.separator();
                 }
                 if ui.menu_item(label) {

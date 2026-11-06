@@ -7,12 +7,10 @@
 //! Logging is event-only: a `SetLink` that actually changes the link logs `link set` / `link
 //! cleared` at debug; the per-tick `MoveNode`/pan/select actions never log.
 
-use aberredengine::prelude::Vec2;
-
 use super::camera::pan_by_screen_delta;
 use super::geometry::Hit;
 use super::interaction::{Action, link_at};
-use crate::model::{ContextMenuRequest, DialogueDoc, Link, NodeKey, Slot};
+use crate::model::{ContextMenuRequest, DialogueDoc, Link};
 
 /// Applies `actions` to `doc` in order and returns the context-menu request, if any (when several
 /// `OpenContextMenu` actions arrive in one tick, the last one wins). `PanByScreenDelta` pans the
@@ -60,7 +58,8 @@ mod tests {
     use crate::graph::fixtures::{GUARD, doc_from};
     use crate::graph::interaction::Action;
     use crate::graph::layout::auto_layout;
-    use crate::model::{CamState, Outputs};
+    use crate::model::{CamState, NodeKey, Outputs, Slot};
+    use aberredengine::prelude::Vec2;
 
     /// guard.json keys (1-based in node order): greet = 1 (3 choices), friend = 2 (Next(End)),
     /// pass = 3 (Next(friend)).

@@ -8,7 +8,7 @@ use rustc_hash::{FxHashMap, FxHashSet};
 
 use crate::graph::describe::{row_link, row_text};
 use crate::graph::geometry;
-use crate::model::{DialogueDoc, Link, NodeKey, Outputs, Severity, Slot};
+use crate::model::{DialogueDoc, Link, NodeKey, Severity, Slot};
 
 /// What an output row's target resolves to (for the signature).
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -101,19 +101,28 @@ pub enum ProjOp {
     DespawnEdge(NodeKey, Slot),
 }
 
+/// Whether a plan changes the entity STRUCTURE (any spawn/despawn), as opposed to only moving
+/// nodes or rewriting edges in place. Only structural plans are worth logging: a plan made of
+/// just `MoveNode`/`RewriteEdge` happens on every tick while a node is dragged.
+pub fn is_structural(ops: &[ProjOp]) -> bool {
+    ops.iter().any(|op| {
+        matches!(
+            op,
+            ProjOp::DespawnAll
+                | ProjOp::SpawnNode(_)
+                | ProjOp::RespawnNode(_)
+                | ProjOp::DespawnNode(_)
+                | ProjOp::SpawnEdge(_, _)
+                | ProjOp::DespawnEdge(_, _)
+        )
+    })
+}
+
 fn target_kind(link: &Link) -> TargetKind {
     match link {
         Link::End => TargetKind::End,
         Link::Node(_) => TargetKind::Node,
         Link::Dangling(_) => TargetKind::Dangling,
-    }
-}
-
-/// The output `Slot` of row `i`: `Slot::Next` for a `Next` node, else `Slot::Choice(i)`.
-fn slot_at(node: &crate::model::EdNode, i: usize) -> Slot {
-    match &node.out {
-        Outputs::Next(_) => Slot::Next,
-        Outputs::Choices(_) => Slot::Choice(i),
     }
 }
 
@@ -166,7 +175,7 @@ pub fn snapshot_of(doc: &mut DialogueDoc, metrics_ready: bool) -> Snapshot {
             {
                 edges.push(EdgeView {
                     from_key: node.key,
-                    slot: slot_at(node, i),
+                    slot: geometry::slot_at(node, i),
                     target: *target,
                     from: geometry::output_pin(node, i),
                     to: geometry::input_pin(target_node),
@@ -494,6 +503,32 @@ mod tests {
             edges: Vec::new(),
         };
         assert_eq!(plan_projection(&shown, &empty), vec![ProjOp::DespawnAll]);
+    }
+
+    #[test]
+    fn is_structural_is_true_only_for_spawn_or_despawn_ops() {
+        assert!(!is_structural(&[]), "an empty plan is not structural");
+        assert!(
+            !is_structural(&[
+                ProjOp::MoveNode(NodeKey(1), Vec2::new(5.0, 5.0)),
+                ProjOp::RewriteEdge(NodeKey(1), Slot::Next),
+            ]),
+            "move/rewrite-only plans (a drag) stay silent"
+        );
+        for op in [
+            ProjOp::DespawnAll,
+            ProjOp::SpawnNode(NodeKey(1)),
+            ProjOp::RespawnNode(NodeKey(1)),
+            ProjOp::DespawnNode(NodeKey(1)),
+            ProjOp::SpawnEdge(NodeKey(1), Slot::Next),
+            ProjOp::DespawnEdge(NodeKey(1), Slot::Next),
+        ] {
+            assert!(is_structural(&[op]), "{op:?} is structural");
+            assert!(
+                is_structural(&[ProjOp::MoveNode(NodeKey(2), Vec2::ZERO), op]),
+                "one structural op makes the whole plan structural: {op:?}"
+            );
+        }
     }
 
     #[test]

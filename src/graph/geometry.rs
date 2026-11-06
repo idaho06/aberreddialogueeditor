@@ -51,7 +51,7 @@ pub enum Hit {
 }
 
 /// The output `Slot` of row `i`: `Slot::Next` for a `Next` node, else `Slot::Choice(i)`.
-fn slot_at(node: &EdNode, i: usize) -> Slot {
+pub fn slot_at(node: &EdNode, i: usize) -> Slot {
     match &node.out {
         Outputs::Next(_) => Slot::Next,
         Outputs::Choices(_) => Slot::Choice(i),

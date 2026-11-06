@@ -13,7 +13,7 @@ use aberredengine::core::resources::font_metrics::{FontMetricsStore, FontMetrics
 use aberredengine::prelude::*;
 use rustc_hash::FxHashMap;
 
-use crate::graph::projection_plan::{EdgeView, ProjOp, Snapshot};
+use crate::graph::projection_plan::{EdgeView, ProjOp, Snapshot, is_structural};
 use crate::graph::{
     CORNER_RADIUS, EDGE_COLOR, EDGE_SELECTED_COLOR, EDGE_THICKNESS, EdgeEntry, FONT, FONT_SIZE,
     GraphEdge, GraphEntities, GraphNode, GraphPart, HEADER_H, NODE_W, NodeEntry, NodeView,
@@ -123,7 +123,9 @@ pub fn graph_projection_system(
         (snapshot, ops, revision, node_data)
     }; // guard dropped: commands and queries only run from here on
 
-    if !ops.is_empty() {
+    // Log only structural plans (spawn/despawn): a drag produces a MoveNode/RewriteEdge-only
+    // plan on every tick and must stay silent.
+    if is_structural(&ops) {
         log::debug!(
             "projection: {} nodes, {} edges",
             snapshot.nodes.len(),
@@ -220,7 +222,7 @@ fn spawn_node(
     );
     let root = commands
         .spawn((
-            GraphNode { key },
+            GraphNode,
             WorldPosition::from_vec(view.pos),
             ZIndex(Z_NODE_BODY),
         ))
@@ -277,7 +279,6 @@ fn spawn_node(
         key,
         NodeEntry {
             root,
-            sig: view.sig.clone(),
             pos: view.pos,
         },
     );
@@ -290,10 +291,7 @@ fn spawn_edge(commands: &mut Commands, ents: &mut GraphEntities, ev: &EdgeView) 
     let color = edge_color(ev.selected_source);
     let entity = commands
         .spawn((
-            GraphEdge {
-                from: ev.from_key,
-                slot: ev.slot,
-            },
+            GraphEdge,
             WorldPosition::from_vec(ev.from),
             ZIndex(Z_EDGE),
             Shape::bezier(c1, c2, to_rel, color).with_thickness(EDGE_THICKNESS),

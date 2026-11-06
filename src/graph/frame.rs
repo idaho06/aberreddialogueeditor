@@ -19,8 +19,10 @@ pub fn frame_doc(doc: &mut DialogueDoc, viewport: Vec2) {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::graph::camera::world_to_screen;
     use crate::graph::fixtures::{GUARD, doc_from};
-    use crate::graph::{auto_layout, node_rect, world_to_screen};
+    use crate::graph::geometry::node_rect;
+    use crate::graph::layout::auto_layout;
     use crate::model::CamState;
 
     #[test]

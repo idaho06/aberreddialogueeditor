@@ -34,8 +34,7 @@ pub fn poll(ctx: &GuiCtx, active: Option<usize>, actions: &mut Vec<EditorAction>
     if io.want_text_input {
         return;
     }
-    let size = io.display_size;
-    let viewport = Vec2::new(size[0], size[1]);
+    let viewport = super::display_viewport(ui);
     // Plain keys (no Ctrl): Delete deletes the selection; F frames all unless Ctrl is held.
     actions.extend(plain_shortcuts(
         ui.is_key_pressed(Key::Delete),

@@ -19,6 +19,8 @@ pub fn screen_to_world(cam: &CamState, viewport: Vec2, p: Vec2) -> Vec2 {
 }
 
 /// Screen pixel at which world point `w` is shown (inverse of [`screen_to_world`]).
+// Part of the pure camera API pair; exercised by the round-trip tests, not called on the hot path.
+#[allow(dead_code)]
 pub fn world_to_screen(cam: &CamState, viewport: Vec2, w: Vec2) -> Vec2 {
     (w - cam.target) * cam.zoom + viewport / 2.0
 }

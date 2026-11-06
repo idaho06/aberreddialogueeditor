@@ -104,10 +104,14 @@ All acceptance commands are `just` recipes (run from the repo root):
 
 ## Graph (pure)
 
-- `src/graph` is pure logic — no ECS/imgui, only `Vec2` from the engine prelude; module-level
-  `#![allow(dead_code)]` until the projection/input steps consume it. `style.rs` holds the numeric
-  constants (node/pin/row/gap sizes, edge/outline metrics, `FONT`); colours and Z come later.
-- `geometry.rs`: `rows`/`node_height`/`node_rect`, `input_pin`/`output_pin`, `hit_test` (pins beat
+- `src/graph` is pure logic — no ECS/imgui; engine imports in the pure files are limited to `Vec2`
+  and `Color`. There is no blanket module-level allow any more: the re-export list in `mod.rs` only
+  re-exports what is actually consumed, and the one item kept solely for its tests
+  (`camera::world_to_screen`) carries a narrow item-level `#[allow(dead_code)]` with a reason.
+  `style.rs` holds the numeric constants (node/pin/row/gap sizes, edge/outline metrics, `FONT`)
+  plus the palette and the Z indices.
+- `geometry.rs`: `rows`/`node_height`/`node_rect`, `input_pin`/`output_pin`, `slot_at` (row index -> output
+  `Slot`; shared with the projection plan), `hit_test` (pins beat
   bodies, later node in `doc.nodes` wins), `edge_curve` (control points RELATIVE to the source pin,
   endpoint `to - from`), `arrow_tip_dir`, `graph_bounds`. `wrap.rs`: char-safe greedy `wrap_text`
   with `"..."` truncation via a `measure` callback, plus `fit_line`. `camera.rs`:
@@ -140,14 +144,16 @@ All acceptance commands are `just` recipes (run from the repo root):
   insert needed). It is the only graph file besides `components.rs` importing ECS types. Per tick it locks
   `WorkspaceMutex` only to snapshot the active doc and clone what the plan needs, then unlocks before any
   `Commands`/query call; when doc id, revision and metrics readiness are unchanged it returns without
-  snapshotting. `GraphEntities` now also carries `shown: Shown` (the `prev` side of the next diff).
+  snapshotting. `GraphEntities` also carries `shown: Shown` (the `prev` side of the next diff).
 - Nodes spawn as a root (`GraphNode`, `WorldPosition`, `ZIndex`) with `GraphPart`/`ChildOf` children at local
   positions: body `rounded_rect` (thick outline only when selected/error), header `rect`, `DynamicText` items
   (dropped until font metrics arrive — `metrics_ready` is in the node sig, so nodes respawn when they land),
   pin circles. `Shape::circle` is centred on its local origin, so pins need no `.with_origin`; `DynamicText`'s
   position is its top-left. Edges are bezier entities at the source pin (control points relative to it) with one
   arrowhead `GraphPart` child (`arrowhead_points`, pure + tested); `RewriteEdge` assigns position/shape only when
-  different. Logs `projection: N nodes, M edges` at debug on plans that change anything.
+  different. Logs `projection: N nodes, M edges` at debug only for STRUCTURAL plans (`is_structural` in
+  `projection_plan.rs`: any Spawn/Respawn/Despawn op) — MoveNode/RewriteEdge-only plans (a node drag, once per
+  tick) stay silent.
 - Children of graph entities (node parts, the edge arrowhead) must be spawned WITH a `GlobalTransform2D`
   (`child_global(parent_world, local)` in `projection.rs`): the engine's `propagate_transforms` inserts it via
   deferred Commands, so without it a freshly spawned child renders one frame at its raw local offset (near world
@@ -156,8 +162,8 @@ All acceptance commands are `just` recipes (run from the repo root):
 ## Graph camera system (plan 03 step 3)
 
 - `src/graph/camera_system.rs` holds `graph_frame_system` — registered with `add_system` in `main.rs` (Update),
-  the one system later steps extend with the rest of the graph input so camera update and input run in a fixed
-  order. Each tick it locks the workspace briefly, reads the active doc's `CamState`, and writes
+  the single graph frame system: wheel/pan camera update and the interaction input run in it in a fixed order,
+  with the `MainCamera` write last. Each tick it locks the workspace briefly, reads the active doc's `CamState`, and writes
   `MainCamera(Camera2D::new(target, viewport/2).with_zoom(zoom))` via the plain `camera_update` (viewport =
   `GameConfig` render size; no active doc leaves the camera alone). Wheel zoom (`apply_wheel` = `zoom_at` with
   `1.1^scroll_y` around the cursor) and middle-mouse pan (`Action3`, `pan_step` accumulating screen-pixel deltas
@@ -188,7 +194,7 @@ All acceptance commands are `just` recipes (run from the repo root):
   `OpenContextMenu { world: press_world, hit: press-time hit }` plus `Select` for a node hit.
 - Tests are the `#[cfg(test)]` module in `interaction.rs`: one table of scripted `InputSample` sequences over
   `guard.json`/`invalid_dangling.json` (via `graph::fixtures` + `auto_layout`), plus zoom-radius, vanished-node and
-  `drag_preview` tests. The later input system (`step 4b`) feeds samples and applies the returned `Action`s.
+  `drag_preview` tests. The frame system in `camera_system.rs` feeds the samples and applies the returned `Action`s.
 
 ## Graph input application (plan 03 step 4b)
 

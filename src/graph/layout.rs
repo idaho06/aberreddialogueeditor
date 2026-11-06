@@ -9,22 +9,17 @@ use std::collections::{HashMap, VecDeque};
 
 use aberredengine::prelude::Vec2;
 
-use crate::graph::geometry::node_height;
+use crate::graph::describe::row_link;
+use crate::graph::geometry::{node_height, rows};
 use crate::graph::style::{COL_GAP, NODE_W, ROW_GAP};
-use crate::model::{DialogueDoc, EdChoice, EdNode, Link, NodeKey, Outputs};
+use crate::model::{DialogueDoc, EdNode, Link, NodeKey};
 
 /// Outgoing `Link::Node` targets of `node` in slot order (the `next` slot, then the choices).
 fn node_targets(node: &EdNode) -> impl Iterator<Item = NodeKey> + '_ {
-    let (next, choices): (Option<NodeKey>, &[EdChoice]) = match &node.out {
-        Outputs::Next(Link::Node(target)) => (Some(*target), &[]),
-        Outputs::Next(_) => (None, &[]),
-        Outputs::Choices(choices) => (None, choices),
-    };
-    next.into_iter()
-        .chain(choices.iter().filter_map(|choice| match choice.target {
-            Link::Node(target) => Some(target),
-            _ => None,
-        }))
+    (0..rows(node)).filter_map(|i| match row_link(node, i) {
+        Link::Node(target) => Some(*target),
+        _ => None,
+    })
 }
 
 /// BFS from `seed`, which is assigned the next free layer (`layers.len()` at entry), extending

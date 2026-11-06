@@ -10,21 +10,18 @@ use aberredengine::bevy_ecs;
 use aberredengine::prelude::{Component, Entity, Resource, Vec2};
 use rustc_hash::FxHashMap;
 
-use crate::graph::projection_plan::{NodeSig, Shown};
+use crate::graph::projection_plan::Shown;
 use crate::model::{NodeKey, Slot};
 
-/// Marker on a node's root entity (the entity carrying its `WorldPosition`).
+/// Marker on a node's root entity (the entity carrying its `WorldPosition`). The node's key is
+/// the key of its entry in [`GraphEntities::nodes`].
 #[derive(Component, Debug, Clone, Copy)]
-pub struct GraphNode {
-    pub key: NodeKey,
-}
+pub struct GraphNode;
 
-/// Marker on an edge entity (the bezier line; its arrowhead is a `GraphPart` child).
+/// Marker on an edge entity (the bezier line; its arrowhead is a `GraphPart` child). The edge's
+/// `(from, slot)` is the key of its entry in [`GraphEntities::edges`].
 #[derive(Component, Debug, Clone, Copy)]
-pub struct GraphEdge {
-    pub from: NodeKey,
-    pub slot: Slot,
-}
+pub struct GraphEdge;
 
 /// Marker on every non-root visual child of a node or edge (body, header, texts, pins,
 /// arrowheads), so they can be despawned with their parent.
@@ -35,11 +32,10 @@ pub struct GraphPart;
 #[derive(Component, Debug, Clone, Copy)]
 pub struct GraphPreview;
 
-/// One spawned node: its root entity plus the signature/position it was spawned with.
+/// One spawned node: its root entity plus the position it was spawned at.
 #[derive(Debug, Clone)]
 pub struct NodeEntry {
     pub root: Entity,
-    pub sig: NodeSig,
     pub pos: Vec2,
 }
 
