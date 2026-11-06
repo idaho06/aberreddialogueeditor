@@ -9,4 +9,7 @@ pub fn load_state(mut app_state: ResMut<AppState>) {
     app_state.insert(UiCaptureHandle::default());
     app_state.insert(WorkspaceMutex::default());
     app_state.insert(AsyncFileDialogMutex::default());
+    log::info!(
+        "load_state: inserted UiCaptureHandle, WorkspaceMutex and AsyncFileDialogMutex into AppState"
+    );
 }

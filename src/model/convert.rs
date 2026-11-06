@@ -38,10 +38,12 @@ pub fn from_def(def: &DialogueDef) -> DialogueDoc {
     doc.start = match id_to_key.get(def.start.as_str()) {
         Some(&key) => Some(key),
         None => {
-            doc.load_warnings.push(format!(
+            let warning = format!(
                 "start \"{}\" does not match any node id; start cleared",
                 def.start
-            ));
+            );
+            log::warn!("from_def load warning: {warning}");
+            doc.load_warnings.push(warning);
             None
         }
     };
@@ -51,10 +53,12 @@ pub fn from_def(def: &DialogueDef) -> DialogueDoc {
         let out = match &node_def.choices {
             Some(choices) if !choices.is_empty() => {
                 if node_def.next.is_some() {
-                    doc.load_warnings.push(format!(
+                    let warning = format!(
                         "node \"{}\" sets both next and choices; kept the choices and dropped next",
                         node_def.id
-                    ));
+                    );
+                    log::warn!("from_def load warning: {warning}");
+                    doc.load_warnings.push(warning);
                 }
                 Outputs::Choices(
                     choices
@@ -70,16 +74,27 @@ pub fn from_def(def: &DialogueDef) -> DialogueDoc {
                 )
             }
             Some(_) => {
-                doc.load_warnings.push(format!(
+                let warning = format!(
                     "node \"{}\" has an explicit empty choices list; treated as terminal",
                     node_def.id
-                ));
+                );
+                log::warn!("from_def load warning: {warning}");
+                doc.load_warnings.push(warning);
                 Outputs::Next(Link::End)
             }
             None => Outputs::Next(resolve_link(&node_def.next, &id_to_key)),
         };
         doc.nodes[i].out = out;
     }
+    log::debug!(
+        "from_def: {} nodes, start {}",
+        doc.nodes.len(),
+        if doc.start.is_some() {
+            "resolved"
+        } else {
+            "not resolved"
+        }
+    );
     doc
 }
 

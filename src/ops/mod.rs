@@ -64,6 +64,11 @@ fn tmp_sibling(path: &Path) -> PathBuf {
 /// [`OpenOutcome::Opened`] with the doc's load warnings.
 pub fn open_path(ws: &mut Workspace, path: &Path) -> Result<OpenOutcome, OpError> {
     let canonical = canonical_or(path);
+    log::debug!(
+        "open_path: requested {}, canonical {}",
+        path.display(),
+        canonical.display()
+    );
     let existing = ws.find_by_path(&canonical).or_else(|| {
         ws.docs.iter().position(|doc| {
             doc.path
@@ -73,18 +78,35 @@ pub fn open_path(ws: &mut Workspace, path: &Path) -> Result<OpenOutcome, OpError
     });
     if let Some(index) = existing {
         ws.active = index;
+        log::debug!("open_path: already open, focusing tab {index}");
         return Ok(OpenOutcome::Focused);
     }
 
-    let text = std::fs::read_to_string(path)
-        .map_err(|err| OpError::Io(format!("cannot read {}: {err}", path.display())))?;
-    let def: DialogueDef = serde_json::from_str(&text)
-        .map_err(|err| OpError::Json(format!("cannot parse {}: {err}", path.display())))?;
+    let text = std::fs::read_to_string(path).map_err(|err| {
+        let err = OpError::Io(format!("cannot read {}: {err}", path.display()));
+        log::warn!("open_path failed: {err}");
+        err
+    })?;
+    let def: DialogueDef = serde_json::from_str(&text).map_err(|err| {
+        let err = OpError::Json(format!("cannot parse {}: {err}", path.display()));
+        log::warn!("open_path failed: {err}");
+        err
+    })?;
     let mut doc = from_def(&def);
     doc.path = Some(canonical);
     doc.dirty = false;
     let warnings = doc.load_warnings.clone();
+    for warning in &warnings {
+        log::warn!("open_path: load warning from {}: {warning}", path.display());
+    }
+    let node_count = doc.nodes.len();
     ws.add_doc(doc);
+    log::debug!(
+        "open_path: opened {} as tab {} with {node_count} nodes and {} load warnings",
+        path.display(),
+        ws.active,
+        warnings.len()
+    );
     Ok(OpenOutcome::Opened { warnings })
 }
 
@@ -93,7 +115,9 @@ pub fn open_path(ws: &mut Workspace, path: &Path) -> Result<OpenOutcome, OpError
 /// on failure nothing is written — no file, no `.tmp`. On success the doc's `path` is set to the
 /// canonical path of the saved file and the doc is marked clean.
 pub fn save_doc(doc: &mut DialogueDoc, path: &Path) -> Result<(), OpError> {
+    log::debug!("save_doc: target {}", path.display());
     if let Err(err) = engine_gate(doc) {
+        log::warn!("save_doc: engine gate rejected {}: {err}", path.display());
         return Err(OpError::Invalid(err.to_string()));
     }
     let mut text = serde_json::to_string_pretty(&to_def(doc))
@@ -102,13 +126,17 @@ pub fn save_doc(doc: &mut DialogueDoc, path: &Path) -> Result<(), OpError> {
     let tmp = tmp_sibling(path);
     if let Err(err) = std::fs::write(&tmp, &text).and_then(|_| std::fs::rename(&tmp, path)) {
         let _ = std::fs::remove_file(&tmp);
-        return Err(OpError::Io(format!(
-            "cannot write {}: {err}",
-            path.display()
-        )));
+        let err = OpError::Io(format!("cannot write {}: {err}", path.display()));
+        log::warn!("save_doc failed: {err}");
+        return Err(err);
     }
     doc.path = Some(canonical_or(path));
     doc.mark_clean();
+    log::debug!(
+        "save_doc: wrote {} bytes to {} via .tmp rename",
+        text.len(),
+        path.display()
+    );
     Ok(())
 }
 
@@ -117,7 +145,9 @@ pub fn save_doc(doc: &mut DialogueDoc, path: &Path) -> Result<(), OpError> {
 /// [`open_path`] does, so the target file may not exist yet — returns [`OpError::AlreadyOpen`] and
 /// writes nothing. An out-of-range `index` is [`OpError::Io`] "no such document".
 pub fn save_doc_at(ws: &mut Workspace, index: usize, path: &Path) -> Result<(), OpError> {
+    log::debug!("save_doc_at: doc {index} to {}", path.display());
     if index >= ws.docs.len() {
+        log::warn!("save_doc_at failed: no document at index {index}");
         return Err(OpError::Io("no such document".to_owned()));
     }
     let target = canonical_or(path);
@@ -126,6 +156,10 @@ pub fn save_doc_at(ws: &mut Workspace, index: usize, path: &Path) -> Result<(), 
             i != index && doc.path.as_ref().is_some_and(|p| canonical_or(p) == target)
         });
     if clash {
+        log::warn!(
+            "save_doc_at failed: {} is already open in another tab",
+            path.display()
+        );
         return Err(OpError::AlreadyOpen(path.display().to_string()));
     }
     save_doc(&mut ws.docs[index], path)
@@ -134,11 +168,17 @@ pub fn save_doc_at(ws: &mut Workspace, index: usize, path: &Path) -> Result<(), 
 /// Pushes a new empty doc and makes it active.
 pub fn new_doc(ws: &mut Workspace) {
     ws.add_doc(DialogueDoc::new_empty());
+    log::debug!("new_doc: {} docs, active {}", ws.docs.len(), ws.active);
 }
 
 /// Closes the doc at `index` (wraps [`Workspace::close_doc`], keeping `active` valid).
 pub fn close_doc(ws: &mut Workspace, index: usize) {
     ws.close_doc(index);
+    log::debug!(
+        "close_doc: closed tab {index}, {} docs left, active {}",
+        ws.docs.len(),
+        ws.active
+    );
 }
 
 /// Tab title of a doc: the file name of its path, or "Untitled". No dirty marker here.

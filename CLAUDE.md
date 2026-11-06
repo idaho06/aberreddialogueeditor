@@ -76,3 +76,16 @@ All acceptance commands are `just` recipes (run from the repo root):
   `!io().want_text_input`. Modals (error queue, unsaved-changes close/quit) open from the frame's top-level
   scope after the menu; one at a time, error modal first. While a native dialog is in flight, tab closes are
   ignored (a pending Save As is applied by tab index).
+
+## Logging
+
+- Default level is `info` (set in `main.rs`); configure at run time with `RUST_LOG`, e.g.
+  `RUST_LOG=aberreddialogueeditor=debug just run`.
+- Log on events only (an action applied, a dialog result, a file operation, a lint-cache recompute) — never
+  inside per-frame GUI paths.
+- What is logged where: file operations and outcomes in `ops`, dialog requests/results/notifications in
+  `systems/file_dialogs.rs`, the inserted shared handles in `systems/setup.rs`, applied/ignored `EditorAction`s
+  in `scenes/editor/actions.rs`, modal choices and outcomes in `scenes/editor/modals.rs`, `from_def` load
+  warnings plus summary in `model/convert.rs`, and the lint-cache recompute (revision, error/warning counts)
+  in `model/doc.rs`.
+- Never log document content: no node text, speaker text or whole file contents.

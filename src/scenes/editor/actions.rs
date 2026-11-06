@@ -110,15 +110,32 @@ pub fn apply_action(
                     }
                 }
                 // Untitled (or no) active doc: Save behaves like Save As.
-                None => request_save_as(&mut fx, app_state, ws),
+                None => {
+                    log::debug!(
+                        "action {action:?}: active doc has no path, falling back to Save As"
+                    );
+                    request_save_as(&mut fx, app_state, ws);
+                }
             }
         }
         EditorAction::SaveAs => request_save_as(&mut fx, app_state, ws),
         EditorAction::CloseTab(index) => {
             if app_state.is_some_and(dialog_in_flight) {
+                log::debug!(
+                    "action {action:?} ignored: a file dialog is in flight \
+                     (active={}, docs={}, pending_close={:?}, pending_quit={})",
+                    ws.active,
+                    ws.docs.len(),
+                    ws.pending_close,
+                    ws.pending_quit
+                );
                 return fx;
             }
             let Some(dirty) = ws.docs.get(index).map(|doc| doc.dirty) else {
+                log::debug!(
+                    "action {action:?} ignored: no doc at index {index} (docs={})",
+                    ws.docs.len()
+                );
                 return fx;
             };
             match close_decision(dirty) {
@@ -131,6 +148,13 @@ pub fn apply_action(
             QuitDecision::Confirm => ws.pending_quit = true,
         },
     }
+    log::debug!(
+        "action {action:?} applied: active={}, docs={}, pending_close={:?}, pending_quit={}",
+        ws.active,
+        ws.docs.len(),
+        ws.pending_close,
+        ws.pending_quit
+    );
     fx
 }
 

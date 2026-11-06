@@ -116,16 +116,19 @@ fn apply_choice(app_state: &AppState, choice: Option<ModalChoice>) -> bool {
     let Some(handle) = app_state.get::<WorkspaceMutex>().cloned() else {
         return false;
     };
+    log::debug!("modal choice {choice:?} applied");
     let mut ws = handle.lock().unwrap();
     match choice {
         ModalChoice::ErrorOk => {
             if !ws.notifications.is_empty() {
                 ws.notifications.remove(0);
+                log::debug!("modal {choice:?}: dismissed the queued error notification");
             }
         }
         ModalChoice::CloseSave => {
             let Some(index) = ws.pending_close.filter(|index| *index < ws.docs.len()) else {
                 ws.pending_close = None;
+                log::debug!("modal {choice:?}: pending close index out of range, cleared");
                 return false;
             };
             match ws.docs[index].path.clone() {
@@ -133,17 +136,24 @@ fn apply_choice(app_state: &AppState, choice: Option<ModalChoice>) -> bool {
                     Ok(()) => {
                         ops::close_doc(&mut ws, index);
                         ws.pending_close = None;
+                        log::debug!("modal {choice:?}: saved and closed tab {index}");
                     }
                     Err(err) => {
                         // A failure pushes a notification (shown by the error modal first) and
                         // keeps both the tab and the pending close.
                         ws.notifications.push(ops::error_notification(&err));
+                        log::debug!(
+                            "modal {choice:?}: save of tab {index} failed, error modal queued"
+                        );
                     }
                 },
                 None => {
                     // Untitled doc: hand over to the Save As dialog and keep the tab open.
                     ws.pending_close = None;
                     drop(ws);
+                    log::debug!(
+                        "modal {choice:?}: tab {index} is untitled, Save As dialog requested"
+                    );
                     request_async_dialog(
                         app_state,
                         AsyncFileDialogRequest::SaveDialogueAs { doc_index: index },
@@ -156,15 +166,23 @@ fn apply_choice(app_state: &AppState, choice: Option<ModalChoice>) -> bool {
                 && index < ws.docs.len()
             {
                 ops::close_doc(&mut ws, index);
+                log::debug!("modal {choice:?}: discarded changes and closed tab {index}");
             }
             ws.pending_close = None;
         }
-        ModalChoice::CloseCancel => ws.pending_close = None,
+        ModalChoice::CloseCancel => {
+            ws.pending_close = None;
+            log::debug!("modal {choice:?}: close cancelled");
+        }
         ModalChoice::QuitDiscard => {
             ws.pending_quit = false;
+            log::debug!("modal {choice:?}: quit confirmed");
             return true;
         }
-        ModalChoice::QuitCancel => ws.pending_quit = false,
+        ModalChoice::QuitCancel => {
+            ws.pending_quit = false;
+            log::debug!("modal {choice:?}: quit cancelled");
+        }
     }
     false
 }

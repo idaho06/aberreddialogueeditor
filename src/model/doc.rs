@@ -8,7 +8,7 @@ use std::path::{Path, PathBuf};
 
 use aberredengine::prelude::{DialogueCondition, DialogueEffect, Vec2};
 
-use crate::model::lint::{Problem, lint};
+use crate::model::lint::{Problem, Severity, lint};
 
 /// Stable identifier of an [`EdNode`] within its doc. Keys are never reused: [`DialogueDoc::fresh_key`]
 /// only moves `next_key` forward.
@@ -373,6 +373,15 @@ impl DialogueDoc {
             .is_none_or(|(cached, _)| *cached != self.revision);
         if stale {
             let problems = lint(self);
+            let errors = problems
+                .iter()
+                .filter(|p| p.severity == Severity::Error)
+                .count();
+            log::debug!(
+                "lint cache recomputed: revision={}, {errors} errors, {} warnings",
+                self.revision,
+                problems.len() - errors
+            );
             self.lint_cache = Some((self.revision, problems));
         }
         self.lint_cache

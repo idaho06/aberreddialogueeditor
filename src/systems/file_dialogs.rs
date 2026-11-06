@@ -96,6 +96,7 @@ pub fn request_async_dialog(app_state: &AppState, request: AsyncFileDialogReques
         }
     });
     state.receiver = Some(receiver);
+    log::debug!("file dialog started: {request:?}");
 }
 
 /// True while a native dialog is in flight (a receiver exists). The GUI reads this to suspend
@@ -117,6 +118,15 @@ fn drain_completed(state: &mut AsyncFileDialogState) -> Option<AsyncFileDialogRe
     match receiver.try_recv() {
         Ok(result) => {
             state.receiver = None;
+            match &result {
+                Some(AsyncFileDialogResult::OpenDialogue { path }) => {
+                    log::debug!("file dialog completed: open {path:?}");
+                }
+                Some(AsyncFileDialogResult::SaveDialogueAs { doc_index, path }) => {
+                    log::debug!("file dialog completed: save as doc {doc_index} to {path:?}");
+                }
+                None => log::debug!("file dialog cancelled by the user"),
+            }
             result
         }
         Err(TryRecvError::Empty) => None,
@@ -133,15 +143,20 @@ fn drain_completed(state: &mut AsyncFileDialogState) -> Option<AsyncFileDialogRe
 pub fn apply_result(ws: &mut Workspace, result: AsyncFileDialogResult) {
     match result {
         AsyncFileDialogResult::OpenDialogue { path } => {
+            log::debug!("applying dialog result: open {path:?}");
             // Load warnings are shown in the Nodes panel, not as notifications: ignore them.
             if let Err(err) = ops::open_path(ws, &path) {
+                log::warn!("dialog result open failed, notification pushed: {err}");
                 ws.notifications.push(err.to_string());
             }
         }
         AsyncFileDialogResult::SaveDialogueAs { doc_index, path } => {
+            log::debug!("applying dialog result: save as doc {doc_index} to {path:?}");
             // The engine's own message goes to the modal without the "invalid dialogue: " prefix.
             if let Err(err) = ops::save_doc_at(ws, doc_index, &path) {
-                ws.notifications.push(ops::error_notification(&err));
+                let note = ops::error_notification(&err);
+                log::warn!("dialog result save as failed, notification pushed: {note}");
+                ws.notifications.push(note);
             }
         }
     }
