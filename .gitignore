@@ -1,4 +1,60 @@
+# Rust build output
 /target
+**/*.rs.bk
+*.pdb
+
+# App runtime state
 imgui.ini
+
+# AI assistant state (CLAUDE.md itself stays tracked: vibe jobs read it)
+/.claude/
+.claude/settings.local.json
+/.vibe/
+/.serena/
+/.mcp.json
+AGENTS.md
+/AGENTS/
+/.cursor/
+.cursorrules
+/.aider*
+/.continue/
+/.codex/
+/.gemini/
+GEMINI.md
+
+# Editors and IDEs
+/.vscode/
+/.idea/
+*.iml
+/.fleet/
+/.zed/
+.helix/
+*.sublime-project
+*.sublime-workspace
+
+# Vim / Neovim / Emacs
 *.swp
-/.vibe
+*.swo
+*~
+.*.sw?
+Session.vim
+.netrwhist
+tags
+[._]*.un~
+\#*\#
+.\#*
+*.elc
+.dir-locals.el
+
+# Caches and logs
+.cache/
+/.clangd/
+compile_commands.json
+*.log
+
+# OS files
+.DS_Store
+Thumbs.db
+desktop.ini
+.directory
+.Trash-*

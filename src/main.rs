@@ -1,0 +1,24 @@
+mod model;
+mod scenes;
+mod state;
+mod systems;
+
+use aberredengine::prelude::*;
+
+fn main() {
+    env_logger::Builder::from_env(env_logger::Env::default().default_filter_or("info")).init();
+
+    if let Err(err) = EngineBuilder::new()
+        .config_str(include_str!("../config.ini"))
+        .on_setup(systems::setup::load_state)
+        .add_observer(systems::window_resize::on_window_resized)
+        .add_scene("editor")
+        .on_scene_enter("editor", scenes::editor::enter)
+        .add_scene_gui("editor", scenes::editor::gui)
+        .initial_scene("editor")
+        .try_run()
+    {
+        log::error!("engine exited with an error: {err}");
+        std::process::exit(1);
+    }
+}
