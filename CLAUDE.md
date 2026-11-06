@@ -155,3 +155,26 @@ All acceptance commands are `just` recipes (run from the repo root):
 - `src/graph/frame.rs` (pure): `frame_doc(doc, viewport)` = `set_camera(frame_all(graph_bounds(doc), viewport, 40.0))`.
   `EditorAction::FrameAll { viewport }` (actions.rs; View > "Frame all" and the `F` key, both reading the viewport
   from `ui.io().display_size`) is applied in `apply_action` via `frame_doc`; no-op without an active doc.
+
+## Graph interaction state machine (plan 03 step 4a)
+
+- `src/graph/interaction.rs` (pure, only `Vec2` from the prelude) holds `GraphInteraction`/`Phase`
+  (`Idle`/`DraggingNode`/`DraggingLink`/`RightDown`, exclusive — the other button's press mid-gesture is ignored)
+  plus `step(&mut state, &doc, &InputSample, prev_mouse_screen) -> Vec<Action>` and `drag_preview`.
+- Pin pickup radius is `(PIN_R + 4.0) / zoom` (screen-constant); `mouse_captured_by_ui` gates gesture STARTS only —
+  a running gesture ends on release, never on capture. A node vanishing mid-gesture falls back to `Idle` (no unwrap).
+- Left press on a body/input pin selects and drags (`MoveNode` = `mouse_world - grab_offset`); on an output pin it
+  only selects and carries the link. `DraggingLink` records `press_screen`, `had_link` (the pickup link was
+  `Node`/`Dangling`, not `End`) and `restore: Option<NodeKey>` (the pickup-time target, Some only for a
+  `Link::Node`); the carried link detaches (`SetLink .. End`) only once the pointer moves > 4 px screen from
+  `press_screen` (`detached`), on drag ticks and the release tick alike — so a plain click on a linked pin emits
+  no mutation at all. Release over any part of a node (body/input pin/any other output pin, self allowed)
+  reconnects, over empty space a detached link stays `End` — dragging off the pin removes it and never creates a
+  node. Releasing over the SAME output pin the drag started from: a detached drag with `restore` re-emits
+  `SetLink .. Link::Node(r)` to restore it; anything else emits nothing (a click never self-links). Right press
+  starts `RightDown`; > 4 px screen travel pans
+  (`PanByScreenDelta(mouse_screen - prev_mouse_screen)` each tick), otherwise release emits
+  `OpenContextMenu { world: press_world, hit: press-time hit }` plus `Select` for a node hit.
+- Tests are the `#[cfg(test)]` module in `interaction.rs`: one table of scripted `InputSample` sequences over
+  `guard.json`/`invalid_dangling.json` (via `graph::fixtures` + `auto_layout`), plus zoom-radius, vanished-node and
+  `drag_preview` tests. The later input system (`step 4b`) feeds samples and applies the returned `Action`s.
