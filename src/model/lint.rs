@@ -10,7 +10,7 @@ use std::collections::{HashMap, HashSet};
 use aberredengine::prelude::{DialogueError, DialogueTree};
 
 use crate::model::convert::to_def;
-use crate::model::doc::{DialogueDoc, Link, NodeKey, Outputs};
+use crate::model::doc::{DialogueDoc, EdChoice, Link, NodeKey, Outputs};
 
 /// How bad a [`Problem`] is.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
@@ -82,15 +82,9 @@ pub fn lint(doc: &DialogueDoc) -> Vec<Problem> {
                 continue;
             }
             if let Some(node) = doc.node(key) {
-                match &node.out {
-                    Outputs::Next(Link::Node(target)) => stack.push(*target),
-                    Outputs::Next(_) => {}
-                    Outputs::Choices(choices) => {
-                        for choice in choices {
-                            if let Link::Node(target) = &choice.target {
-                                stack.push(*target);
-                            }
-                        }
+                for link in out_links(&node.out) {
+                    if let Link::Node(target) = link {
+                        stack.push(*target);
                     }
                 }
             }
@@ -116,29 +110,19 @@ pub fn lint(doc: &DialogueDoc) -> Vec<Problem> {
                 message: format!("duplicate node id \"{}\"", node.id),
             });
         }
-        let mut dangling: Vec<&str> = Vec::new();
-        match &node.out {
-            Outputs::Next(Link::Dangling(target)) => dangling.push(target),
-            Outputs::Next(_) => {}
-            Outputs::Choices(choices) => {
-                for choice in choices {
-                    if let Link::Dangling(target) = &choice.target {
-                        dangling.push(target);
-                    }
-                }
+        for link in out_links(&node.out) {
+            if let Link::Dangling(target) = link {
+                problems.push(Problem {
+                    severity: Severity::Error,
+                    kind: ProblemKind::DanglingTarget,
+                    node: Some(key),
+                    // Mirrors the engine's DialogueError::UnknownTarget Display.
+                    message: format!(
+                        "dialogue node \"{}\" links to unknown node \"{}\"",
+                        node.id, target
+                    ),
+                });
             }
-        }
-        for target in dangling {
-            problems.push(Problem {
-                severity: Severity::Error,
-                kind: ProblemKind::DanglingTarget,
-                node: Some(key),
-                // Mirrors the engine's DialogueError::UnknownTarget Display.
-                message: format!(
-                    "dialogue node \"{}\" links to unknown node \"{}\"",
-                    node.id, target
-                ),
-            });
         }
         if let Some(reachable) = &reachable
             && !reachable.contains(&key)
@@ -153,6 +137,16 @@ pub fn lint(doc: &DialogueDoc) -> Vec<Problem> {
     }
 
     problems
+}
+
+/// A node's outgoing links in report order: the `next` link first, then the choices' targets.
+fn out_links(out: &Outputs) -> impl Iterator<Item = &Link> {
+    let (next, choices): (Option<&Link>, &[EdChoice]) = match out {
+        Outputs::Next(link) => (Some(link), &[]),
+        Outputs::Choices(choices) => (None, choices),
+    };
+    next.into_iter()
+        .chain(choices.iter().map(|choice| &choice.target))
 }
 
 /// True when `problems` contains at least one [`Severity::Error`].
@@ -172,49 +166,41 @@ mod tests {
     use crate::model::doc::{DialogueDoc, NodeKey, Outputs, Slot};
     use aberredengine::prelude::{DialogueDef, Vec2};
 
-    const GUARD: &str = include_str!(concat!(
-        env!("CARGO_MANIFEST_DIR"),
-        "/tests/fixtures/guard.json"
-    ));
-    const LOOPS: &str = include_str!(concat!(
-        env!("CARGO_MANIFEST_DIR"),
-        "/tests/fixtures/loops.json"
-    ));
-    const DANGLING: &str = include_str!(concat!(
-        env!("CARGO_MANIFEST_DIR"),
-        "/tests/fixtures/invalid_dangling.json"
-    ));
-    const DUP_ID: &str = include_str!(concat!(
-        env!("CARGO_MANIFEST_DIR"),
-        "/tests/fixtures/invalid_dup_id.json"
-    ));
-    const BOTH: &str = include_str!(concat!(
-        env!("CARGO_MANIFEST_DIR"),
-        "/tests/fixtures/invalid_both_next_choices.json"
-    ));
-    const EMPTY_CHOICES: &str = include_str!(concat!(
-        env!("CARGO_MANIFEST_DIR"),
-        "/tests/fixtures/invalid_empty_choices.json"
-    ));
-    const NO_START: &str = include_str!(concat!(
-        env!("CARGO_MANIFEST_DIR"),
-        "/tests/fixtures/invalid_no_start.json"
-    ));
+    macro_rules! fixture {
+        ($name:literal) => {
+            include_str!(concat!(
+                env!("CARGO_MANIFEST_DIR"),
+                "/tests/fixtures/",
+                $name,
+                ".json"
+            ))
+        };
+    }
+    const GUARD: &str = fixture!("guard");
+    const LOOPS: &str = fixture!("loops");
+    const DANGLING: &str = fixture!("invalid_dangling");
+    const DUP_ID: &str = fixture!("invalid_dup_id");
+    const BOTH: &str = fixture!("invalid_both_next_choices");
+    const EMPTY_CHOICES: &str = fixture!("invalid_empty_choices");
+    const NO_START: &str = fixture!("invalid_no_start");
 
     fn parse(json: &str) -> DialogueDef {
         serde_json::from_str(json).expect("fixture must parse as DialogueDef")
     }
 
     fn fixture_docs() -> Vec<(&'static str, DialogueDoc)> {
-        vec![
-            ("guard", from_def(&parse(GUARD))),
-            ("loops", from_def(&parse(LOOPS))),
-            ("dangling", from_def(&parse(DANGLING))),
-            ("dup_id", from_def(&parse(DUP_ID))),
-            ("both", from_def(&parse(BOTH))),
-            ("empty_choices", from_def(&parse(EMPTY_CHOICES))),
-            ("no_start", from_def(&parse(NO_START))),
+        [
+            ("guard", GUARD),
+            ("loops", LOOPS),
+            ("dangling", DANGLING),
+            ("dup_id", DUP_ID),
+            ("both", BOTH),
+            ("empty_choices", EMPTY_CHOICES),
+            ("no_start", NO_START),
         ]
+        .into_iter()
+        .map(|(name, json)| (name, from_def(&parse(json))))
+        .collect()
     }
 
     /// A doc with `a --next--> b`, `b` having one choice ("go", target End), start = a.
@@ -228,14 +214,42 @@ mod tests {
         (doc, a, b)
     }
 
-    fn add_dangling_choice(doc: &mut DialogueDoc, key: NodeKey, target: &str) {
-        doc.add_choice(key);
-        let index = if let Some(Outputs::Choices(v)) = doc.node(key).map(|n| &n.out) {
-            v.len() - 1
-        } else {
-            return;
-        };
-        doc.set_link(key, Slot::Choice(index), Link::Dangling(target.to_owned()));
+    /// The engine gate's error for a doc that must fail it.
+    fn gate_err(doc: &DialogueDoc) -> DialogueError {
+        engine_gate(doc).expect_err("the mutation must fail the engine gate")
+    }
+
+    /// The problems of `kind`, in report order.
+    fn of_kind(problems: &[Problem], kind: ProblemKind) -> impl Iterator<Item = &Problem> {
+        problems.iter().filter(move |p| p.kind == kind)
+    }
+
+    /// True when `problems` contains an [`Severity::Error`] of `kind`.
+    fn has_error_of_kind(problems: &[Problem], kind: ProblemKind) -> bool {
+        of_kind(problems, kind).any(|p| p.severity == Severity::Error)
+    }
+
+    /// True when `key` is reported [`ProblemKind::Unreachable`].
+    fn is_unreachable(problems: &[Problem], key: NodeKey) -> bool {
+        of_kind(problems, ProblemKind::Unreachable).any(|p| p.node == Some(key))
+    }
+
+    fn has_no_kind(problems: &[Problem], kind: ProblemKind) -> bool {
+        of_kind(problems, kind).next().is_none()
+    }
+
+    /// The revision stored in the lint cache, if any.
+    fn cached_revision(doc: &DialogueDoc) -> Option<u64> {
+        doc.lint_cache.as_ref().map(|(rev, _)| *rev)
+    }
+
+    fn problem(severity: Severity, kind: ProblemKind) -> Problem {
+        Problem {
+            severity,
+            kind,
+            node: None,
+            message: String::new(),
+        }
     }
 
     type Mutator = fn(&mut DialogueDoc, NodeKey, NodeKey);
@@ -255,7 +269,12 @@ mod tests {
                 d.set_link(a, Slot::Next, Link::Dangling("ghost".to_owned()))
             }),
             ("dangling_choice", |d, _, b| {
-                add_dangling_choice(d, b, "ghost2")
+                d.add_choice(b);
+                let last = match d.node(b).map(|n| &n.out) {
+                    Some(Outputs::Choices(v)) => v.len() - 1,
+                    _ => return,
+                };
+                d.set_link(b, Slot::Choice(last), Link::Dangling("ghost2".to_owned()));
             }),
             ("empty_id", |d, a, _| d.rename_node(a, String::new())),
             ("whitespace_id", |d, a, _| {
@@ -275,34 +294,28 @@ mod tests {
         ]
     }
 
-    /// All fixture docs plus the generated mutation family (sequences of up to 2 mutators on every
-    /// fixture, up to 3 on guard.json).
+    /// All fixture docs plus the generated mutation family: every sequence of 1..=2 mutators on
+    /// every fixture, 1..=3 on guard.json.
     fn all_docs() -> Vec<DialogueDoc> {
-        let mut docs: Vec<DialogueDoc> = Vec::new();
         let muts = mutators();
+        let mut docs = Vec::new();
         for (name, base) in fixture_docs() {
             let a = base.nodes.first().map(|n| n.key).unwrap_or(NodeKey(0));
             let b = base.nodes.get(1).map(|n| n.key).unwrap_or(a);
+            let depth = if name == "guard" { 3 } else { 2 };
             docs.push(base.clone());
-            for (_, m1) in &muts {
-                let mut d = base.clone();
-                m1(&mut d, a, b);
-                docs.push(d.clone());
-                for (_, m2) in &muts {
-                    let mut d2 = d.clone();
-                    m2(&mut d2, a, b);
-                    docs.push(d2);
-                }
-                if name == "guard" {
-                    for (_, m2) in &muts {
-                        for (_, m3) in &muts {
-                            let mut d3 = d.clone();
-                            m2(&mut d3, a, b);
-                            m3(&mut d3, a, b);
-                            docs.push(d3);
-                        }
+            let mut level = vec![base.clone()];
+            for _ in 1..=depth {
+                let mut next = Vec::new();
+                for doc in &level {
+                    for (_, m) in &muts {
+                        let mut child = doc.clone();
+                        m(&mut child, a, b);
+                        docs.push(child.clone());
+                        next.push(child);
                     }
                 }
+                level = next;
             }
         }
         docs
@@ -332,46 +345,37 @@ mod tests {
         // StartMissing: no start at all.
         let (mut doc, _a, _b) = base_doc();
         doc.start = None;
-        let err = engine_gate(&doc).unwrap_err();
+        let err = gate_err(&doc);
         assert!(
             matches!(&err, DialogueError::StartMissing { .. }),
             "got {err:?}"
         );
         assert!(
-            lint(&doc)
-                .iter()
-                .any(|p| p.severity == Severity::Error && p.kind == ProblemKind::StartMissing),
+            has_error_of_kind(&lint(&doc), ProblemKind::StartMissing),
             "lint must report StartMissing as an Error"
         );
 
         // StartMissing: start key no longer present.
         let (mut doc, _a, _b) = base_doc();
         doc.start = Some(NodeKey(999));
-        let err = engine_gate(&doc).unwrap_err();
+        let err = gate_err(&doc);
         assert!(
             matches!(&err, DialogueError::StartMissing { .. }),
             "got {err:?}"
         );
-        assert!(
-            lint(&doc)
-                .iter()
-                .any(|p| p.severity == Severity::Error && p.kind == ProblemKind::StartMissing)
-        );
+        assert!(has_error_of_kind(&lint(&doc), ProblemKind::StartMissing));
 
         // DuplicateNode: every node sharing the id is reported, message names the id.
         let (mut doc, a, b) = base_doc();
         let bid = doc.node(b).expect("b exists").id.clone();
         doc.rename_node(a, bid.clone());
-        let err = engine_gate(&doc).unwrap_err();
+        let err = gate_err(&doc);
         assert!(
             matches!(&err, DialogueError::DuplicateNode { id } if id == &bid),
             "got {err:?}"
         );
         let problems = lint(&doc);
-        let dups: Vec<&Problem> = problems
-            .iter()
-            .filter(|p| p.kind == ProblemKind::DuplicateId)
-            .collect();
+        let dups: Vec<&Problem> = of_kind(&problems, ProblemKind::DuplicateId).collect();
         assert_eq!(dups.len(), 2, "every node with the shared id is reported");
         assert!(dups.iter().all(|p| p.severity == Severity::Error));
         assert!(dups.iter().all(|p| p.node == Some(a) || p.node == Some(b)));
@@ -384,16 +388,13 @@ mod tests {
         // UnknownTarget through `next`; the lint message mirrors the engine's Display.
         let (mut doc, a, _b) = base_doc();
         doc.set_link(a, Slot::Next, Link::Dangling("ghost".to_owned()));
-        let err = engine_gate(&doc).unwrap_err();
+        let err = gate_err(&doc);
         assert!(
             matches!(&err, DialogueError::UnknownTarget { node, target } if node == "node_1" && target == "ghost"),
             "got {err:?}"
         );
         let problems = lint(&doc);
-        let dangling: Vec<&Problem> = problems
-            .iter()
-            .filter(|p| p.kind == ProblemKind::DanglingTarget)
-            .collect();
+        let dangling: Vec<&Problem> = of_kind(&problems, ProblemKind::DanglingTarget).collect();
         assert_eq!(dangling.len(), 1);
         assert_eq!(dangling[0].severity, Severity::Error);
         assert_eq!(dangling[0].node, Some(a));
@@ -406,14 +407,15 @@ mod tests {
         // UnknownTarget through a choice.
         let (mut doc, _a, b) = base_doc();
         doc.set_link(b, Slot::Choice(0), Link::Dangling("ghost2".to_owned()));
-        let err = engine_gate(&doc).unwrap_err();
+        let err = gate_err(&doc);
         assert!(
             matches!(&err, DialogueError::UnknownTarget { node, target } if node == "node_2" && target == "ghost2"),
             "got {err:?}"
         );
-        assert!(lint(&doc).iter().any(|p| p.severity == Severity::Error
-            && p.kind == ProblemKind::DanglingTarget
-            && p.node == Some(b)));
+        assert!(
+            of_kind(&lint(&doc), ProblemKind::DanglingTarget)
+                .any(|p| p.severity == Severity::Error && p.node == Some(b))
+        );
     }
 
     #[test]
@@ -444,10 +446,7 @@ mod tests {
         );
         let problems = lint(&doc);
         assert!(!has_errors(&problems), "no Error: {problems:?}");
-        let unreachable: Vec<&Problem> = problems
-            .iter()
-            .filter(|p| p.kind == ProblemKind::Unreachable)
-            .collect();
+        let unreachable: Vec<&Problem> = of_kind(&problems, ProblemKind::Unreachable).collect();
         assert_eq!(unreachable.len(), 1);
         assert_eq!(unreachable[0].severity, Severity::Warning);
         assert_eq!(unreachable[0].node, Some(b));
@@ -460,33 +459,23 @@ mod tests {
         doc.set_link(a, Slot::Next, Link::Node(a));
         let problems = lint(&doc);
         assert!(
-            !problems
-                .iter()
-                .any(|p| p.kind == ProblemKind::Unreachable && p.node == Some(a)),
+            !is_unreachable(&problems, a),
             "a is reachable through its self-loop: {problems:?}"
         );
-        assert!(
-            problems
-                .iter()
-                .any(|p| p.kind == ProblemKind::Unreachable && p.node == Some(b))
-        );
+        assert!(is_unreachable(&problems, b));
 
         // Two-node cycle a <-> b: everything reachable, no Unreachable at all.
         let (mut doc, a, b) = base_doc();
         doc.set_link(b, Slot::Choice(0), Link::Node(a));
         let problems = lint(&doc);
         assert!(
-            !problems.iter().any(|p| p.kind == ProblemKind::Unreachable),
+            has_no_kind(&problems, ProblemKind::Unreachable),
             "cycle a<->b: all nodes reachable: {problems:?}"
         );
 
         // loops.json (a<->b cycle plus a join on c, detour d): no Unreachable, engine Ok.
         let loops = from_def(&parse(LOOPS));
-        assert!(
-            !lint(&loops)
-                .iter()
-                .any(|p| p.kind == ProblemKind::Unreachable)
-        );
+        assert!(has_no_kind(&lint(&loops), ProblemKind::Unreachable));
         assert!(engine_gate(&loops).is_ok());
     }
 
@@ -494,13 +483,9 @@ mod tests {
     fn unreachable_is_skipped_when_start_is_missing() {
         let doc = from_def(&parse(NO_START));
         let problems = lint(&doc);
+        assert!(has_error_of_kind(&problems, ProblemKind::StartMissing));
         assert!(
-            problems
-                .iter()
-                .any(|p| p.severity == Severity::Error && p.kind == ProblemKind::StartMissing)
-        );
-        assert!(
-            !problems.iter().any(|p| p.kind == ProblemKind::Unreachable),
+            has_no_kind(&problems, ProblemKind::Unreachable),
             "no flood of Unreachable warnings without a start: {problems:?}"
         );
 
@@ -541,25 +526,22 @@ mod tests {
     #[test]
     fn has_errors_detects_any_error_severity() {
         assert!(!has_errors(&[]));
-        assert!(!has_errors(&[Problem {
-            severity: Severity::Warning,
-            kind: ProblemKind::Unreachable,
-            node: None,
-            message: String::new(),
-        }]));
-        assert!(has_errors(&[Problem {
-            severity: Severity::Error,
-            kind: ProblemKind::StartMissing,
-            node: None,
-            message: String::new(),
-        }]));
+        assert!(!has_errors(&[problem(
+            Severity::Warning,
+            ProblemKind::Unreachable
+        )]));
+        assert!(has_errors(&[problem(
+            Severity::Error,
+            ProblemKind::StartMissing
+        )]));
     }
 
     /// Test-only accessor: appends a sentinel to the cached problem list without recomputing.
     fn poison_cache(doc: &mut DialogueDoc) {
-        let Some((_, problems)) = doc.lint_cache.as_mut() else {
-            panic!("the lint cache must exist after problems()");
-        };
+        let (_, problems) = doc
+            .lint_cache
+            .as_mut()
+            .expect("the lint cache must exist after problems()");
         problems.push(Problem {
             severity: Severity::Warning,
             kind: ProblemKind::Unreachable,
@@ -576,23 +558,18 @@ mod tests {
         assert_eq!(fresh.lint_cache, None);
         let problems = fresh.problems();
         assert!(
-            problems
-                .iter()
-                .any(|p| p.severity == Severity::Error && p.kind == ProblemKind::StartMissing),
+            has_error_of_kind(problems, ProblemKind::StartMissing),
             "a fresh doc computes its lint on the first call: {problems:?}"
         );
         assert_eq!(
-            fresh.lint_cache.as_ref().map(|(rev, _)| *rev),
+            cached_revision(&fresh),
             Some(0),
             "the cache is stored at revision 0"
         );
 
         let (mut doc, a, _b) = base_doc();
         let first = doc.problems().to_vec();
-        assert_eq!(
-            doc.lint_cache.as_ref().map(|(rev, _)| *rev),
-            Some(doc.revision)
-        );
+        assert_eq!(cached_revision(&doc), Some(doc.revision));
 
         // Unchanged revision: the cached vector survives (even a poisoned one).
         poison_cache(&mut doc);

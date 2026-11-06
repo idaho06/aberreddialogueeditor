@@ -375,10 +375,9 @@ impl DialogueDoc {
             let problems = lint(self);
             self.lint_cache = Some((self.revision, problems));
         }
-        let Some((_, problems)) = &self.lint_cache else {
-            unreachable!("the lint cache was populated above");
-        };
-        problems
+        self.lint_cache
+            .as_ref()
+            .map_or(&[], |(_, problems)| problems.as_slice())
     }
 
     fn choice_mut(&mut self, key: NodeKey, index: usize) -> Option<&mut EdChoice> {
