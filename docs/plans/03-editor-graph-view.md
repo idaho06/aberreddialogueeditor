@@ -188,7 +188,7 @@ Existing and committed: model, linter, ops, and the pure graph module (src/graph
    Write positions with `doc.set_node_pos` (it bumps `revision` but not `dirty`; layout must NOT make a doc dirty).
    Must be deterministic and must terminate on cycles/self-loops.
 2. In `ops::open_path`, call `auto_layout` on the new doc right before it is pushed (Opened outcome only, never for
-   Focused). Keep the ops change minimal and keep every existing ops test passing (62 tests today).
+   Focused). Keep the ops change minimal and keep every existing test passing (62 tests in the whole crate today).
 TESTS FIRST (#[cfg(test)] in layout.rs, plus one new ops test): guard.json - start in layer 0 (smallest x), no two
 node rects overlap, deterministic (laying out twice gives equal positions), loops.json terminates, unreachable nodes
 land right of all reachable ones, empty doc and single node do not panic, auto_layout leaves `dirty == false`;
