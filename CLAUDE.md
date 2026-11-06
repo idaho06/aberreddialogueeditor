@@ -76,6 +76,9 @@ All acceptance commands are `just` recipes (run from the repo root):
   `!io().want_text_input`. Modals (error queue, unsaved-changes close/quit) open from the frame's top-level
   scope after the menu; one at a time, error modal first. While a native dialog is in flight, tab closes are
   ignored (a pending Save As is applied by tab index).
+- On the `SET_SELECTED` frame imgui still reports the previously selected tab as selected; `tabs::draw`
+  ignores every tab's selected report on that frame (`clicked_focus`) — otherwise the active tab
+  ping-pongs between the old and new tab on every frame.
 
 ## Logging
 

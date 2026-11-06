@@ -34,6 +34,17 @@ fn snapshot(app_state: &AppState) -> Option<(Vec<String>, usize)> {
     Some((labels, ws.active))
 }
 
+/// Which tab a click should focus. On the `SET_SELECTED` frame imgui still reports the previously
+/// selected tab as selected, so that stale report must be ignored — otherwise the active tab
+/// ping-pongs between the old and new tab on every frame.
+fn clicked_focus(select_frame: bool, active: usize, index: usize, selected: bool) -> Option<usize> {
+    if !select_frame && selected && index != active {
+        Some(index)
+    } else {
+        None
+    }
+}
+
 /// Draws the tab strip in a borderless window pinned below the main menu bar. Tab clicks set
 /// `ws.active`; close buttons push [`EditorAction::CloseTab`].
 pub fn draw(ctx: &mut GuiCtx, actions: &mut Vec<EditorAction>) {
@@ -78,8 +89,8 @@ pub fn draw(ctx: &mut GuiCtx, actions: &mut Vec<EditorAction>) {
                     let selected = ui
                         .tab_item_with_flags(label, Some(&mut opened), flags)
                         .is_some();
-                    if selected && index != active {
-                        focus = Some(index);
+                    if let Some(clicked) = clicked_focus(select_frame, active, index, selected) {
+                        focus = Some(clicked);
                     }
                     if !opened {
                         actions.push(EditorAction::CloseTab(index));
@@ -96,5 +107,36 @@ pub fn draw(ctx: &mut GuiCtx, actions: &mut Vec<EditorAction>) {
         if index < ws.docs.len() {
             ws.active = index;
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::clicked_focus;
+
+    #[test]
+    fn select_frame_ignores_the_stale_selected_report() {
+        // On the SET_SELECTED frame imgui still reports the previously selected tab as selected.
+        assert_eq!(clicked_focus(true, 1, 0, true), None);
+        assert_eq!(clicked_focus(true, 1, 1, true), None);
+        assert_eq!(clicked_focus(true, 0, 1, true), None);
+    }
+
+    #[test]
+    fn normal_frame_focuses_a_different_selected_tab() {
+        assert_eq!(clicked_focus(false, 0, 1, true), Some(1));
+        assert_eq!(clicked_focus(false, 1, 0, true), Some(0));
+    }
+
+    #[test]
+    fn active_tab_never_focuses_itself() {
+        assert_eq!(clicked_focus(false, 2, 2, true), None);
+        assert_eq!(clicked_focus(true, 2, 2, true), None);
+    }
+
+    #[test]
+    fn unselected_tabs_never_focus() {
+        assert_eq!(clicked_focus(false, 0, 1, false), None);
+        assert_eq!(clicked_focus(true, 0, 1, false), None);
     }
 }
