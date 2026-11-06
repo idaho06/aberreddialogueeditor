@@ -1,4 +1,5 @@
 mod model;
+mod ops;
 mod scenes;
 mod state;
 mod systems;

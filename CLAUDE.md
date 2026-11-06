@@ -57,3 +57,10 @@ All acceptance commands are `just` recipes (run from the repo root):
   reimplemented in the model.
 - Tests live in `#[cfg(test)]` modules inside the source files: this is a binary crate, so `tests/`
   cannot import its modules (fixtures load via `include_str!(concat!(env!("CARGO_MANIFEST_DIR"), ...))`).
+
+## Ops
+
+- `src/ops` is the file-operation layer: plain functions over `Workspace`/`DialogueDoc` — no imgui, no engine ECS.
+- `open_path` canonicalizes both sides before matching, so any spelling of an already-open file focuses the existing tab.
+- `save_doc` runs `engine_gate` first (a rejected doc writes nothing, not even a `.tmp`) and saves atomically via `<path>.tmp` + rename.
+- Doc paths are stored canonical/absolute by `open_path`/`save_doc`; `doc_title` is the file name or "Untitled".
