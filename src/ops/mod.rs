@@ -6,6 +6,7 @@ use std::path::{Path, PathBuf};
 
 use aberredengine::prelude::DialogueDef;
 
+use crate::graph::auto_layout;
 use crate::model::{DialogueDoc, Workspace, engine_gate, from_def, to_def};
 
 /// What [`open_path`] did with the requested file.
@@ -100,6 +101,7 @@ pub fn open_path(ws: &mut Workspace, path: &Path) -> Result<OpenOutcome, OpError
         log::warn!("open_path: load warning from {}: {warning}", path.display());
     }
     let node_count = doc.nodes.len();
+    auto_layout(&mut doc);
     ws.add_doc(doc);
     log::debug!(
         "open_path: opened {} as tab {} with {node_count} nodes and {} load warnings",
@@ -427,6 +429,43 @@ mod tests {
             "the no_start fixture has one load warning"
         );
         assert_eq!(ws.active_doc().unwrap().load_warnings.len(), 1);
+    }
+
+    #[test]
+    fn open_path_auto_layouts_the_new_doc_without_dirtying_it() {
+        let mut ws = Workspace::default();
+        assert!(matches!(open_guard(&mut ws), OpenOutcome::Opened { .. }));
+        let doc = ws.active_doc().unwrap();
+        assert!(!doc.dirty, "auto-layout on load must not dirty the doc");
+        let mut seen = std::collections::HashSet::new();
+        for node in &doc.nodes {
+            assert!(
+                node.pos != Vec2::ZERO,
+                "node \"{}\" got a real position",
+                node.id
+            );
+            assert!(
+                seen.insert((node.pos.x.to_bits(), node.pos.y.to_bits())),
+                "node \"{}\" has a distinct position: {:?}",
+                node.id,
+                node.pos
+            );
+        }
+
+        // Re-opening the same path (Focused) must NOT re-layout a moved node.
+        let doc = ws.active_doc_mut().unwrap();
+        let key = doc.nodes[0].key;
+        doc.set_node_pos(key, Vec2::new(999.0, 999.0));
+        let moved = doc.node(key).unwrap().pos;
+        assert_eq!(
+            open_path(&mut ws, &fixture("guard.json")).unwrap(),
+            OpenOutcome::Focused
+        );
+        assert_eq!(
+            ws.active_doc().unwrap().node(key).unwrap().pos,
+            moved,
+            "the Focused path must not re-layout"
+        );
     }
 
     #[test]

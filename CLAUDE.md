@@ -103,3 +103,7 @@ All acceptance commands are `just` recipes (run from the repo root):
   `frame_all` (zoom clamped to [0.1, 1.0], `None` -> ZERO/1.0).
 - Graph tests are `#[cfg(test)]` modules in each file; fixtures load via
   `include_str!(concat!(env!("CARGO_MANIFEST_DIR"), "/tests/fixtures/guard.json"))`.
+- `layout.rs`: `auto_layout(doc)` is the layered left-to-right layout — BFS depth from `start` (back edges
+  ignored, unreachable nodes in trailing columns), barycenter ordering with two forward sweeps, columns at
+  `layer * (NODE_W + COL_GAP)` with each layer centred on y = 0. It writes via `set_node_pos`, so it bumps
+  `revision` but never sets `dirty`; `ops::open_path` runs it on every newly opened doc (never on Focused).

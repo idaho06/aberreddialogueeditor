@@ -5,6 +5,7 @@
 
 mod camera;
 mod geometry;
+mod layout;
 mod style;
 mod wrap;
 
@@ -15,6 +16,7 @@ pub use geometry::{
     Hit, arrow_tip_dir, edge_curve, graph_bounds, hit_test, input_pin, node_height, node_rect,
     output_pin, rows,
 };
+pub use layout::auto_layout;
 pub use style::{
     COL_GAP, CORNER_RADIUS, EDGE_THICKNESS, FONT, FONT_SIZE, HEADER_H, NODE_W, OUTLINE_THICKNESS,
     PAD, PIN_R, ROW_GAP, ROW_H, TEXT_AREA_H, TEXT_MAX_LINES,
