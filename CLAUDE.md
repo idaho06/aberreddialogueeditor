@@ -64,3 +64,15 @@ All acceptance commands are `just` recipes (run from the repo root):
 - `open_path` canonicalizes both sides before matching, so any spelling of an already-open file focuses the existing tab.
 - `save_doc` runs `engine_gate` first (a rejected doc writes nothing, not even a `.tmp`) and saves atomically via `<path>.tmp` + rename.
 - Doc paths are stored canonical/absolute by `open_path`/`save_doc`; `doc_title` is the file name or "Untitled".
+
+## GUI
+
+- Every user intent (menu item, Ctrl shortcut, tab close button) is an `EditorAction`, applied in ONE place:
+  `scenes/editor::actions::apply_action` (pure over `Workspace`; native-dialog requests go through its
+  `Option<&AppState>` parameter — the GUI passes `None` under the lock and dispatches the returned request after).
+- Lock discipline: lock `WorkspaceMutex` only for short snapshots and per action, never while calling
+  `request_async_dialog`/`dialog_in_flight` or any rfd code; widgets are drawn with the guard dropped.
+- Shortcuts are read with `ui.is_key_pressed(Key::..)` + `io().key_ctrl`/`key_shift`, only when
+  `!io().want_text_input`. Modals (error queue, unsaved-changes close/quit) open from the frame's top-level
+  scope after the menu; one at a time, error modal first. While a native dialog is in flight, tab closes are
+  ignored (a pending Save As is applied by tab index).

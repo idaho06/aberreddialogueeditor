@@ -1,0 +1,78 @@
+//! The "Nodes" window (a plain, non-docked window): the active doc's load warnings in a
+//! collapsing header, then a selectable list of its node ids. Clicking a row selects the node.
+//!
+//! Locking: the workspace is locked only to snapshot the panel contents and to apply a click;
+//! the widgets are drawn with the guard dropped.
+
+use aberredengine::prelude::imgui::{Condition, TreeNodeFlags};
+use aberredengine::prelude::*;
+
+use crate::model::NodeKey;
+use crate::state::WorkspaceMutex;
+
+/// Snapshot of the Nodes panel.
+struct NodesSnap {
+    load_warnings: Vec<String>,
+    /// `(key, id)` per node, in doc order.
+    nodes: Vec<(NodeKey, String)>,
+    selected: Option<NodeKey>,
+}
+
+fn snapshot(app_state: &AppState) -> Option<NodesSnap> {
+    let handle = app_state.get::<WorkspaceMutex>()?;
+    let ws = handle.lock().unwrap();
+    let doc = ws.active_doc()?;
+    Some(NodesSnap {
+        load_warnings: doc.load_warnings.clone(),
+        nodes: doc
+            .nodes
+            .iter()
+            .map(|node| (node.key, node.id.clone()))
+            .collect(),
+        selected: doc.selected,
+    })
+}
+
+/// Draws the Nodes window for the active doc.
+pub fn draw(ctx: &mut GuiCtx) {
+    let snap = snapshot(ctx.app_state);
+    let mut clicked = None;
+    let ui = ctx.ui;
+    ui.window("Nodes")
+        .size([240.0, 320.0], Condition::FirstUseEver)
+        .build(|| match &snap {
+            None => ui.text_disabled("(no nodes)"),
+            Some(snap) => {
+                if !snap.load_warnings.is_empty()
+                    && ui.collapsing_header("Load warnings", TreeNodeFlags::DEFAULT_OPEN)
+                {
+                    for warning in &snap.load_warnings {
+                        ui.bullet_text(warning);
+                    }
+                }
+                if snap.nodes.is_empty() {
+                    ui.text_disabled("(no nodes)");
+                }
+                for (key, id) in &snap.nodes {
+                    // `##<key>` keeps the id unique in the window even when node ids duplicate.
+                    let label = format!("{id}##{}", key.0);
+                    if ui
+                        .selectable_config(label)
+                        .selected(snap.selected == Some(*key))
+                        .build()
+                    {
+                        clicked = Some(*key);
+                    }
+                }
+            }
+        });
+
+    if let Some(key) = clicked
+        && let Some(handle) = ctx.app_state.get::<WorkspaceMutex>().cloned()
+    {
+        let mut ws = handle.lock().unwrap();
+        if let Some(doc) = ws.active_doc_mut() {
+            doc.select(Some(key));
+        }
+    }
+}

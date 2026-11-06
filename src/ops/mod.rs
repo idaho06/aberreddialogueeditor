@@ -1,7 +1,6 @@
 //! File operations on the [`Workspace`]: plain functions over the model — no imgui, no engine ECS.
 //!
 //! Engine imports are limited to the dialogue types (`DialogueDef`) plus `load_dialogue` in tests.
-#![allow(dead_code)] // consumed by the next plan step
 
 use std::path::{Path, PathBuf};
 
@@ -149,6 +148,16 @@ pub fn doc_title(doc: &DialogueDoc) -> String {
         .and_then(Path::file_name)
         .map(|name| name.to_string_lossy().into_owned())
         .unwrap_or_else(|| "Untitled".to_owned())
+}
+
+/// The notification text for a failed operation, shown in the GUI's error modal:
+/// [`OpError::Invalid`] keeps only the engine's own message (no "invalid dialogue: " prefix);
+/// every other error uses its `Display` text.
+pub fn error_notification(err: &OpError) -> String {
+    match err {
+        OpError::Invalid(msg) => msg.clone(),
+        err => err.to_string(),
+    }
 }
 
 #[cfg(test)]
@@ -480,6 +489,23 @@ mod tests {
         // Saving onto the doc's OWN path is not a collision (the index matches).
         save_doc_at(&mut ws, 0, &out).expect("re-saving to the same path is allowed");
         assert_eq!(ws.docs.len(), 1);
+    }
+
+    #[test]
+    fn error_notification_keeps_only_the_engine_message_for_invalid() {
+        let invalid =
+            OpError::Invalid("dialogue node \"a\" links to unknown node \"b\"".to_owned());
+        assert_eq!(
+            error_notification(&invalid),
+            "dialogue node \"a\" links to unknown node \"b\"",
+            "no \"invalid dialogue: \" prefix"
+        );
+        let io = OpError::Io("cannot read x.json: nope".to_owned());
+        assert_eq!(error_notification(&io), io.to_string());
+        let json = OpError::Json("cannot parse y.json: bad".to_owned());
+        assert_eq!(error_notification(&json), json.to_string());
+        let dup = OpError::AlreadyOpen("/tmp/z.json".to_owned());
+        assert_eq!(error_notification(&dup), dup.to_string());
     }
 
     #[test]

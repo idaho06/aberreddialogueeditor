@@ -5,7 +5,6 @@
 //! thread, then a worker thread drives it with `futures::executor::block_on` and sends the result
 //! over a crossbeam channel stored in `AppState`. [`poll_async_dialogs`] (logic thread) drains the
 //! channel once per tick and applies the result through the pure [`apply_result`].
-#![allow(dead_code)] // `request_async_dialog`/`clear_async_dialog` are called by the GUI in the next plan step
 
 use std::future::Future;
 use std::path::PathBuf;
@@ -18,7 +17,7 @@ use futures::FutureExt;
 use rfd::AsyncFileDialog;
 
 use crate::model::Workspace;
-use crate::ops::{self, OpError};
+use crate::ops;
 use crate::state::WorkspaceMutex;
 
 /// A file-dialog request from the GUI. Only one dialog can be in flight at a time.
@@ -98,6 +97,16 @@ pub fn request_async_dialog(app_state: &AppState, request: AsyncFileDialogReques
     state.receiver = Some(receiver);
 }
 
+/// True while a native dialog is in flight (a receiver exists). The GUI reads this to suspend
+/// tab closes: a pending Save As result is applied by tab index, so closing a tab meanwhile
+/// would shift the indices. Open/Save As requests are already ignored by
+/// [`request_async_dialog`] while a dialog is in flight.
+pub fn dialog_in_flight(app_state: &AppState) -> bool {
+    app_state
+        .get::<AsyncFileDialogMutex>()
+        .is_some_and(|handle| handle.lock().unwrap().receiver.is_some())
+}
+
 /// Drains one completed dialog from `state`, if any: `Ok(result)` (Some = picked, None = cancelled)
 /// clears the receiver and returns the result; `Empty` returns None and keeps the receiver;
 /// `Disconnected` warns, clears the receiver and returns None. Lock-free so tests can inject a
@@ -135,11 +144,9 @@ pub fn apply_result(ws: &mut Workspace, result: AsyncFileDialogResult) {
             }
         }
         AsyncFileDialogResult::SaveDialogueAs { doc_index, path } => {
-            match ops::save_doc_at(ws, doc_index, &path) {
-                Ok(()) => {}
-                // The engine's own message goes to the modal without the "invalid dialogue: " prefix.
-                Err(OpError::Invalid(msg)) => ws.notifications.push(msg),
-                Err(err) => ws.notifications.push(err.to_string()),
+            // The engine's own message goes to the modal without the "invalid dialogue: " prefix.
+            if let Err(err) = ops::save_doc_at(ws, doc_index, &path) {
+                ws.notifications.push(ops::error_notification(&err));
             }
         }
     }
@@ -164,6 +171,7 @@ pub fn poll_async_dialogs(app_state: Res<AppState>) {
 }
 
 /// Drops the in-flight dialog's receiver (the worker's send then fails and is only logged).
+#[allow(dead_code)] // reserved for scene-exit cleanup in a later plan step
 pub fn clear_async_dialog(app_state: &AppState) {
     let Some(handle) = app_state.get::<AsyncFileDialogMutex>() else {
         return;
@@ -210,6 +218,27 @@ mod tests {
         AsyncFileDialogResult::OpenDialogue {
             path: fixture("guard.json"),
         }
+    }
+
+    #[test]
+    fn dialog_in_flight_reflects_the_receiver_presence() {
+        let mut app_state = AppState::default();
+        assert!(
+            !dialog_in_flight(&app_state),
+            "no handle inserted: nothing in flight"
+        );
+        let (tx, rx) = unbounded();
+        let handle: AsyncFileDialogMutex =
+            Arc::new(Mutex::new(AsyncFileDialogState { receiver: Some(rx) }));
+        app_state.insert(handle);
+        assert!(
+            dialog_in_flight(&app_state),
+            "a receiver means a dialog is open"
+        );
+        drop(tx);
+        let handle: AsyncFileDialogMutex = Arc::new(Mutex::new(AsyncFileDialogState::default()));
+        app_state.insert(handle);
+        assert!(!dialog_in_flight(&app_state), "no receiver: idle again");
     }
 
     #[test]
