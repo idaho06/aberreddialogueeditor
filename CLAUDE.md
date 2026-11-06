@@ -69,9 +69,13 @@ All acceptance commands are `just` recipes (run from the repo root):
 
 ## GUI
 
-- Every user intent (menu item, Ctrl shortcut, tab close button) is an `EditorAction`, applied in ONE place:
+- Every user intent (menu item, Ctrl shortcut, tab close button, graph context-menu item) is an
+  `EditorAction`, applied in ONE place:
   `scenes/editor::actions::apply_action` (pure over `Workspace`; native-dialog requests go through its
   `Option<&AppState>` parameter — the GUI passes `None` under the lock and dispatches the returned request after).
+  `EditorAction` also carries the node actions (`AddNodeAt`/`AddNode`/`DeleteNode`/`SetStart`/`DeleteSelected`);
+  the graph context menu is drawn by `scenes/editor/context_menu.rs`, which drains
+  `Workspace.pending_context_menu` and opens the `graph_ctx` popup from the frame's top-level scope.
 - Lock discipline: lock `WorkspaceMutex` only for short snapshots and per action, never while calling
   `request_async_dialog`/`dialog_in_flight` or any rfd code; widgets are drawn with the guard dropped.
 - Shortcuts are read with `ui.is_key_pressed(Key::..)` + `io().key_ctrl`/`key_shift`, only when
@@ -195,3 +199,16 @@ All acceptance commands are `just` recipes (run from the repo root):
   resets the interaction, and no active doc clears the preview and leaves the camera alone.
 - `src/graph/preview.rs` (`add_late_system`) keeps ONE `GraphPreview` bezier entity while `GraphInput.preview` is
   Some — spawn on demand (also when the remembered entity died, e.g. scene switch), rewrite in place, despawn on None.
+
+## Graph context menu and node actions (plan 03 step 4c)
+
+- `EditorAction` gained `AddNodeAt(Vec2)`, `AddNode { viewport }`, `DeleteNode(NodeKey)`, `SetStart(NodeKey)` and
+  `DeleteSelected`, all applied in the single `apply_action` (no-ops without an active doc; `AddNode` places the node
+  at `graph::screen_to_world(&doc.camera, viewport, viewport / 2.0)` and selects it). Edit > "Add node" pushes
+  `AddNode { viewport }`; the Delete key pushes `DeleteSelected`; `F` no longer fires while Ctrl is held (Ctrl+F).
+- `src/scenes/editor/context_menu.rs` (called from `gui.rs` after `nodes::draw`, before `modals::draw`, at the frame's
+  top-level scope) takes `ws.pending_context_menu` under a short lock (guard dropped before any imgui call), stores it
+  in a `thread_local!` `Cell` and calls `ui.open_popup("graph_ctx")` exactly once per request; `ui.popup` renders the
+  pure `items_for(request)` list (node hit -> "Set as start"/"Delete node"/"Add node here", empty -> only "Add node
+  here", separator before the last item when more than one) — a click pushes the action and closes the popup, and the
+  stored request is cleared once the popup is no longer open.

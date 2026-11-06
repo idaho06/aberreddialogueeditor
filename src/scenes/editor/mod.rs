@@ -1,4 +1,5 @@
 mod actions;
+mod context_menu;
 mod gui;
 mod lifecycle;
 mod menu;

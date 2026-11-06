@@ -10,14 +10,15 @@
 
 use aberredengine::prelude::*;
 
-use crate::graph::frame_doc;
-use crate::model::Workspace;
+use crate::graph::{frame_doc, screen_to_world};
+use crate::model::{NodeKey, Workspace};
 use crate::ops;
 use crate::systems::file_dialogs::{
     AsyncFileDialogRequest, dialog_in_flight, request_async_dialog,
 };
 
-/// One user intent, produced by the File menu, a shortcut or a tab close button.
+/// One user intent, produced by a menu item, a shortcut, a tab close button or a graph
+/// context-menu item.
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub enum EditorAction {
     /// File > New / Ctrl+N: append an untitled doc and activate it.
@@ -36,6 +37,21 @@ pub enum EditorAction {
     /// active doc. `viewport` is the window size in screen pixels, read by the producer from
     /// `ui.io().display_size`.
     FrameAll { viewport: Vec2 },
+    /// Context menu "Add node here": append a node at the given world position and select it.
+    /// No-op without an active doc.
+    AddNodeAt(Vec2),
+    /// Edit > "Add node": append a node at the world position of the screen centre and select
+    /// it. No-op without an active doc. `viewport` is read by the producer from
+    /// `ui.io().display_size`.
+    AddNode { viewport: Vec2 },
+    /// Context menu "Delete node": remove the node (links to it become End). No-op without an
+    /// active doc or for an unknown key.
+    DeleteNode(NodeKey),
+    /// Context menu "Set as start": make the node the doc's start. No-op without an active doc
+    /// or for an unknown key.
+    SetStart(NodeKey),
+    /// Delete key: remove the selected node, if any. No-op without an active doc or selection.
+    DeleteSelected,
 }
 
 /// Effects of an applied action that need more than the workspace itself.
@@ -158,6 +174,41 @@ pub fn apply_action(
                 frame_doc(doc, viewport);
             }
         }
+        EditorAction::AddNodeAt(world) => {
+            // No active doc: no-op.
+            if let Some(doc) = ws.active_doc_mut() {
+                let key = doc.add_node(world);
+                doc.select(Some(key));
+            }
+        }
+        EditorAction::AddNode { viewport } => {
+            // No active doc: no-op. The screen centre maps to the camera target.
+            if let Some(doc) = ws.active_doc_mut() {
+                let world = screen_to_world(&doc.camera, viewport, viewport / 2.0);
+                let key = doc.add_node(world);
+                doc.select(Some(key));
+            }
+        }
+        EditorAction::DeleteNode(key) => {
+            // No active doc or unknown key: no-op (the mutator no-ops on unknown keys).
+            if let Some(doc) = ws.active_doc_mut() {
+                doc.delete_node(key);
+            }
+        }
+        EditorAction::SetStart(key) => {
+            // No active doc or unknown key: no-op (the mutator no-ops on unknown keys).
+            if let Some(doc) = ws.active_doc_mut() {
+                doc.set_start(key);
+            }
+        }
+        EditorAction::DeleteSelected => {
+            // No active doc or no selection: no-op.
+            if let Some(doc) = ws.active_doc_mut()
+                && let Some(key) = doc.selected
+            {
+                doc.delete_node(key);
+            }
+        }
     }
     log::debug!(
         "action {action:?} applied: active={}, docs={}, pending_close={:?}, pending_quit={}",
@@ -198,6 +249,7 @@ fn request_save_as(fx: &mut ActionEffects, app_state: Option<&AppState>, ws: &Wo
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::model::{CamState, Link, Outputs, Slot};
     use crate::scenes::editor::testkit::{TempDir, fixture};
     use aberredengine::prelude::Vec2;
 
@@ -414,5 +466,163 @@ mod tests {
         let fx = apply_action(&mut ws, EditorAction::Quit, None);
         assert!(!fx.quit, "dirty workspace must not quit yet");
         assert!(ws.pending_quit, "the confirm modal is requested");
+    }
+
+    /// A workspace with one clean doc holding `a --next--> b`, start = a, no selection.
+    fn ws_with_two_linked_nodes() -> (Workspace, NodeKey, NodeKey) {
+        let mut ws = Workspace::default();
+        ops::new_doc(&mut ws);
+        let (a, b) = {
+            let doc = ws.active_doc_mut().unwrap();
+            let a = doc.add_node(Vec2::ZERO);
+            let b = doc.add_node(Vec2::new(100.0, 0.0));
+            doc.set_link(a, Slot::Next, Link::Node(b));
+            doc.mark_clean();
+            (a, b)
+        };
+        (ws, a, b)
+    }
+
+    #[test]
+    fn add_node_at_adds_a_selected_dirty_node_at_the_position_and_the_first_node_becomes_start() {
+        let mut ws = Workspace::default();
+        ops::new_doc(&mut ws);
+        ws.active_doc_mut().unwrap().mark_clean();
+        let pos = Vec2::new(12.0, -7.0);
+        let fx = apply_action(&mut ws, EditorAction::AddNodeAt(pos), None);
+        assert!(fx.dialog.is_none() && !fx.quit);
+        let doc = ws.active_doc().unwrap();
+        assert_eq!(doc.nodes.len(), 1);
+        let key = doc.nodes[0].key;
+        assert_eq!(doc.node(key).map(|n| n.pos), Some(pos));
+        assert_eq!(doc.selected, Some(key), "the new node is selected");
+        assert!(doc.dirty, "adding a node dirties the doc");
+        assert_eq!(
+            doc.start,
+            Some(key),
+            "the first node of an empty doc becomes start"
+        );
+    }
+
+    #[test]
+    fn add_node_places_the_node_at_the_world_position_of_the_screen_centre() {
+        let viewport = Vec2::new(800.0, 600.0);
+        let mut ws = Workspace::default();
+        ops::new_doc(&mut ws);
+        // Default camera (target ZERO, zoom 1): the screen centre maps to the target.
+        let fx = apply_action(&mut ws, EditorAction::AddNode { viewport }, None);
+        assert!(fx.dialog.is_none() && !fx.quit);
+        let doc = ws.active_doc().unwrap();
+        assert_eq!(doc.nodes.len(), 1);
+        assert_eq!(doc.camera, CamState::default());
+        assert_eq!(doc.nodes[0].pos, doc.camera.target);
+        assert_eq!(doc.selected, Some(doc.nodes[0].key));
+        assert!(doc.dirty);
+        // A moved/zoomed camera: the screen centre still maps to the target.
+        let target = Vec2::new(50.0, -20.0);
+        ws.active_doc_mut()
+            .unwrap()
+            .set_camera(CamState { target, zoom: 2.0 });
+        apply_action(&mut ws, EditorAction::AddNode { viewport }, None);
+        let doc = ws.active_doc().unwrap();
+        assert_eq!(doc.nodes.len(), 2);
+        assert_eq!(doc.nodes[1].pos, target);
+        assert_eq!(doc.selected, Some(doc.nodes[1].key));
+    }
+
+    #[test]
+    fn delete_node_removes_it_turns_incoming_links_into_end_and_clears_start_and_selection() {
+        let (mut ws, a, b) = ws_with_two_linked_nodes();
+        {
+            let doc = ws.active_doc_mut().unwrap();
+            doc.set_start(b);
+            doc.select(Some(b));
+            doc.mark_clean();
+        }
+        let revision = ws.active_doc().unwrap().revision;
+        let fx = apply_action(&mut ws, EditorAction::DeleteNode(b), None);
+        assert!(fx.dialog.is_none() && !fx.quit);
+        let doc = ws.active_doc().unwrap();
+        assert!(doc.node(b).is_none(), "the node is gone");
+        assert!(
+            matches!(doc.node(a).map(|n| &n.out), Some(Outputs::Next(Link::End))),
+            "the link to the deleted node became End"
+        );
+        assert_eq!(doc.start, None, "start referenced the deleted node");
+        assert_eq!(doc.selected, None, "selection referenced the deleted node");
+        assert!(doc.dirty);
+        assert_eq!(doc.revision, revision + 1);
+        // Unknown key: no-op.
+        let fx = apply_action(&mut ws, EditorAction::DeleteNode(NodeKey(999)), None);
+        assert!(fx.dialog.is_none() && !fx.quit);
+        assert_eq!(ws.active_doc().unwrap().revision, revision + 1);
+        assert_eq!(ws.active_doc().unwrap().nodes.len(), 1);
+    }
+
+    #[test]
+    fn set_start_changes_the_start_node_and_unknown_keys_are_no_ops() {
+        let (mut ws, a, b) = ws_with_two_linked_nodes();
+        assert_eq!(
+            ws.active_doc().unwrap().start,
+            Some(a),
+            "first node is start"
+        );
+        ws.active_doc_mut().unwrap().mark_clean();
+        let revision = ws.active_doc().unwrap().revision;
+        let fx = apply_action(&mut ws, EditorAction::SetStart(b), None);
+        assert!(fx.dialog.is_none() && !fx.quit);
+        let doc = ws.active_doc().unwrap();
+        assert_eq!(doc.start, Some(b));
+        assert!(doc.dirty);
+        assert_eq!(doc.revision, revision + 1);
+        // Unknown key: no-op.
+        apply_action(&mut ws, EditorAction::SetStart(NodeKey(999)), None);
+        let doc = ws.active_doc().unwrap();
+        assert_eq!(doc.start, Some(b));
+        assert_eq!(doc.revision, revision + 1, "unknown key must not bump");
+    }
+
+    #[test]
+    fn delete_selected_deletes_the_selection_and_no_ops_without_one() {
+        let (mut ws, a, b) = ws_with_two_linked_nodes();
+        ws.active_doc_mut().unwrap().select(Some(b));
+        ws.active_doc_mut().unwrap().mark_clean();
+        let fx = apply_action(&mut ws, EditorAction::DeleteSelected, None);
+        assert!(fx.dialog.is_none() && !fx.quit);
+        let doc = ws.active_doc().unwrap();
+        assert!(doc.node(b).is_none(), "the selected node is deleted");
+        assert!(
+            matches!(doc.node(a).map(|n| &n.out), Some(Outputs::Next(Link::End))),
+            "the link to it became End"
+        );
+        assert_eq!(doc.selected, None);
+        assert!(doc.dirty);
+
+        // No selection: a no-op (no revision bump, not dirty).
+        ws.active_doc_mut().unwrap().mark_clean();
+        let revision = ws.active_doc().unwrap().revision;
+        let fx = apply_action(&mut ws, EditorAction::DeleteSelected, None);
+        assert!(fx.dialog.is_none() && !fx.quit);
+        let doc = ws.active_doc().unwrap();
+        assert_eq!(doc.revision, revision, "no selection: no-op");
+        assert!(!doc.dirty);
+        assert_eq!(doc.nodes.len(), 1, "nothing was deleted");
+    }
+
+    #[test]
+    fn node_actions_are_no_ops_without_an_active_doc() {
+        let mut ws = Workspace::default();
+        let viewport = Vec2::new(800.0, 600.0);
+        for action in [
+            EditorAction::AddNodeAt(Vec2::new(1.0, 2.0)),
+            EditorAction::AddNode { viewport },
+            EditorAction::DeleteNode(NodeKey(1)),
+            EditorAction::SetStart(NodeKey(1)),
+            EditorAction::DeleteSelected,
+        ] {
+            let fx = apply_action(&mut ws, action, None);
+            assert!(fx.dialog.is_none() && !fx.quit, "{action:?}");
+            assert!(ws.docs.is_empty(), "{action:?}: nothing happened");
+        }
     }
 }
