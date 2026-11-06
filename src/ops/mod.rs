@@ -30,6 +30,8 @@ pub enum OpError {
     Json(String),
     /// The engine's save gate ([`engine_gate`]) rejected the doc; the message is the engine's own error.
     Invalid(String),
+    /// Another open tab already holds the same canonical path.
+    AlreadyOpen(String),
 }
 
 impl std::fmt::Display for OpError {
@@ -38,6 +40,7 @@ impl std::fmt::Display for OpError {
             OpError::Io(msg) => write!(f, "io error: {msg}"),
             OpError::Json(msg) => write!(f, "json error: {msg}"),
             OpError::Invalid(msg) => write!(f, "invalid dialogue: {msg}"),
+            OpError::AlreadyOpen(path) => write!(f, "already open in another tab: {path}"),
         }
     }
 }
@@ -110,6 +113,25 @@ pub fn save_doc(doc: &mut DialogueDoc, path: &Path) -> Result<(), OpError> {
     Ok(())
 }
 
+/// Saves the doc at `index` to `path` (delegates to [`save_doc`]), after a tab-collision check: if a
+/// DIFFERENT doc already holds the same canonical path — compared canonical-or-given the way
+/// [`open_path`] does, so the target file may not exist yet — returns [`OpError::AlreadyOpen`] and
+/// writes nothing. An out-of-range `index` is [`OpError::Io`] "no such document".
+pub fn save_doc_at(ws: &mut Workspace, index: usize, path: &Path) -> Result<(), OpError> {
+    if index >= ws.docs.len() {
+        return Err(OpError::Io("no such document".to_owned()));
+    }
+    let target = canonical_or(path);
+    let clash =
+        ws.docs.iter().enumerate().any(|(i, doc)| {
+            i != index && doc.path.as_ref().is_some_and(|p| canonical_or(p) == target)
+        });
+    if clash {
+        return Err(OpError::AlreadyOpen(path.display().to_string()));
+    }
+    save_doc(&mut ws.docs[index], path)
+}
+
 /// Pushes a new empty doc and makes it active.
 pub fn new_doc(ws: &mut Workspace) {
     ws.add_doc(DialogueDoc::new_empty());
@@ -132,7 +154,7 @@ pub fn doc_title(doc: &DialogueDoc) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use aberredengine::prelude::load_dialogue;
+    use aberredengine::prelude::{Vec2, load_dialogue};
 
     const GUARD_JSON: &str = include_str!(concat!(
         env!("CARGO_MANIFEST_DIR"),
@@ -182,7 +204,10 @@ mod tests {
     /// Asserts the variant message and the Display text of `err` both contain `needle`.
     fn assert_err_contains(err: &OpError, needle: &str) {
         let msg = match err {
-            OpError::Io(msg) | OpError::Json(msg) | OpError::Invalid(msg) => msg,
+            OpError::Io(msg)
+            | OpError::Json(msg)
+            | OpError::Invalid(msg)
+            | OpError::AlreadyOpen(msg) => msg,
         };
         assert!(
             msg.contains(needle),
@@ -374,6 +399,87 @@ mod tests {
             text.contains("\"renamed\""),
             "the saved JSON has the new id"
         );
+    }
+
+    #[test]
+    fn save_doc_at_out_of_range_is_io_no_such_document() {
+        let tmp = TempDir::new("save-at-range");
+        let mut ws = Workspace::default();
+        new_doc(&mut ws);
+        let out = tmp.join("out.json");
+        let err = save_doc_at(&mut ws, 5, &out).expect_err("out-of-range index must fail");
+        assert!(
+            matches!(&err, OpError::Io(msg) if msg == "no such document"),
+            "expected Io(\"no such document\"), got {err}"
+        );
+        assert!(!out.exists(), "nothing may be written");
+    }
+
+    #[test]
+    fn save_doc_at_collision_with_another_tab_writes_nothing() {
+        let tmp = TempDir::new("save-at-collision");
+        let mut ws = Workspace::default();
+        open_guard(&mut ws); // doc 0: canonical guard.json
+        open_path(&mut ws, &fixture("loops.json")).unwrap(); // doc 1, active
+        let loops_path = canon(&fixture("loops.json"));
+
+        // A differently spelled path to doc 0's existing file collides.
+        let respelled = fixture("../fixtures/guard.json");
+        let original_guard = std::fs::read_to_string(&respelled).unwrap();
+        let err = save_doc_at(&mut ws, 1, &respelled).expect_err("must collide with doc 0");
+        assert!(
+            matches!(&err, OpError::AlreadyOpen(_)),
+            "expected AlreadyOpen, got {err}"
+        );
+        assert!(
+            err.to_string().contains("already open in another tab"),
+            "Display text: {err}"
+        );
+        assert_eq!(
+            std::fs::read_to_string(&respelled).unwrap(),
+            original_guard,
+            "the collided target file is untouched"
+        );
+
+        // A not-yet-existing target collides when another doc holds the same given spelling.
+        let planned = tmp.join("planned.json");
+        ws.docs[0].path = Some(planned.clone());
+        let err =
+            save_doc_at(&mut ws, 1, &planned).expect_err("must collide via the given spelling");
+        assert!(matches!(&err, OpError::AlreadyOpen(_)), "got {err}");
+        assert!(!planned.exists(), "nothing may be written");
+
+        assert_eq!(ws.docs.len(), 2);
+        assert_eq!(
+            ws.docs[1].path,
+            Some(loops_path.clone()),
+            "the rejected save-as leaves the doc's path alone"
+        );
+        assert_eq!(ws.docs[0].path, Some(planned), "doc 0 keeps its path");
+    }
+
+    #[test]
+    fn save_doc_at_success_saves_through_save_doc_and_allows_its_own_path() {
+        let tmp = TempDir::new("save-at-ok");
+        let mut ws = Workspace::default();
+        new_doc(&mut ws);
+        ws.active_doc_mut().unwrap().add_node(Vec2::ZERO);
+        assert!(ws.active_doc().unwrap().dirty);
+
+        let out = tmp.join("out.json");
+        save_doc_at(&mut ws, 0, &out).expect("save-as succeeds");
+        let doc = ws.active_doc().unwrap();
+        assert!(!doc.dirty, "save-as marks the doc clean");
+        assert_eq!(
+            doc.path,
+            Some(canon(&out)),
+            "save-as sets the canonical path"
+        );
+        read_saved(&out);
+
+        // Saving onto the doc's OWN path is not a collision (the index matches).
+        save_doc_at(&mut ws, 0, &out).expect("re-saving to the same path is allowed");
+        assert_eq!(ws.docs.len(), 1);
     }
 
     #[test]

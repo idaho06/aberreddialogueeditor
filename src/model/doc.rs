@@ -425,6 +425,14 @@ fn clear_link(link: &mut Link, deleted: NodeKey) {
 pub struct Workspace {
     pub docs: Vec<DialogueDoc>,
     pub active: usize,
+    /// Error-modal queue for the GUI: each entry is one modal message (failed open/save, engine
+    /// save-gate rejections, ...). The GUI drains it.
+    pub notifications: Vec<String>,
+    /// Tab index whose close was requested while the doc is dirty; the GUI shows a confirm modal
+    /// and either closes the tab or clears this.
+    pub pending_close: Option<usize>,
+    /// Set when quit was requested while any doc is dirty; the GUI shows a confirm modal.
+    pub pending_quit: bool,
 }
 
 impl Workspace {

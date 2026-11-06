@@ -12,6 +12,7 @@ fn main() {
     if let Err(err) = EngineBuilder::new()
         .config_str(include_str!("../config.ini"))
         .on_setup(systems::setup::load_state)
+        .add_system(systems::file_dialogs::poll_async_dialogs)
         .add_observer(systems::window_resize::on_window_resized)
         .add_scene("editor")
         .on_scene_enter("editor", scenes::editor::enter)
