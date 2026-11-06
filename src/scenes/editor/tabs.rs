@@ -21,30 +21,23 @@ thread_local! {
     static LAST_ACTIVE: Cell<Option<usize>> = const { Cell::new(None) };
 }
 
-/// One tab's snapshot for drawing.
-struct TabSnap {
-    label: String,
-}
-
-/// Snapshot of the tab strip: labels plus the active index. Locks the workspace briefly.
-fn snapshot(app_state: &AppState) -> Option<(Vec<TabSnap>, usize)> {
+/// Snapshot of the tab strip: one label per doc plus the active index. Locks the workspace briefly.
+fn snapshot(app_state: &AppState) -> Option<(Vec<String>, usize)> {
     let handle = app_state.get::<WorkspaceMutex>()?;
     let ws = handle.lock().unwrap();
-    let tabs = ws
+    let labels = ws
         .docs
         .iter()
         .enumerate()
-        .map(|(index, doc)| TabSnap {
-            label: tab_label(&ops::doc_title(doc), doc.dirty, index),
-        })
+        .map(|(index, doc)| tab_label(&ops::doc_title(doc), doc.dirty, index))
         .collect();
-    Some((tabs, ws.active))
+    Some((labels, ws.active))
 }
 
 /// Draws the tab strip in a borderless window pinned below the main menu bar. Tab clicks set
 /// `ws.active`; close buttons push [`EditorAction::CloseTab`].
 pub fn draw(ctx: &mut GuiCtx, actions: &mut Vec<EditorAction>) {
-    let Some((tabs, active)) = snapshot(ctx.app_state) else {
+    let Some((labels, active)) = snapshot(ctx.app_state) else {
         return;
     };
     // SET_SELECTED only on the frame the active index changed (programmatic open/new/focus).
@@ -71,19 +64,19 @@ pub fn draw(ctx: &mut GuiCtx, actions: &mut Vec<EditorAction>) {
         .position([0.0, menu_bar_height], Condition::Always)
         .size([width, ui.frame_height_with_spacing()], Condition::Always)
         .build(|| {
-            if tabs.is_empty() {
+            if labels.is_empty() {
                 ui.text_disabled("File > New or File > Open...");
                 return;
             }
             if let Some(_bar) = ui.tab_bar("##docs") {
-                for (index, tab) in tabs.iter().enumerate() {
+                for (index, label) in labels.iter().enumerate() {
                     let mut opened = true;
                     let mut flags = TabItemFlags::empty();
                     if select_frame && index == active {
                         flags |= TabItemFlags::SET_SELECTED;
                     }
                     let selected = ui
-                        .tab_item_with_flags(&tab.label, Some(&mut opened), flags)
+                        .tab_item_with_flags(label, Some(&mut opened), flags)
                         .is_some();
                     if selected && index != active {
                         focus = Some(index);

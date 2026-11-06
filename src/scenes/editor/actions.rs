@@ -88,18 +88,7 @@ pub fn quit_decision(ws: &Workspace) -> QuitDecision {
 
 /// Applies one user intent to the workspace. Pure with respect to the GUI: the only engine
 /// interaction is the optional `app_state` used for native dialog requests and the in-flight
-/// check that suspends tab closes.
-///
-/// - `New` appends an untitled doc and activates it.
-/// - `Open` requests the open dialog (ignored by the dialog layer while one is in flight).
-/// - `Save` saves the active doc to its path; an untitled active doc behaves like `SaveAs`.
-///   A failed save pushes the error text into `ws.notifications`.
-/// - `SaveAs` requests the save dialog for the active doc.
-/// - `CloseTab(i)` is ignored while a native dialog is in flight (a pending Save As result is
-///   applied by tab index; closing a tab would shift the indices). A clean doc closes, a dirty
-///   one sets `ws.pending_close`.
-/// - `Quit` sets `ws.pending_quit` when any doc is dirty, otherwise reports
-///   [`ActionEffects::quit`].
+/// check that suspends tab closes while a native dialog is in flight.
 pub fn apply_action(
     ws: &mut Workspace,
     action: EditorAction,
@@ -115,36 +104,16 @@ pub fn apply_action(
             let path = ws.active_doc().and_then(|doc| doc.path.clone());
             match path {
                 Some(path) => {
-                    let result = ops::save_doc(ws.active_doc_mut().expect("active doc"), &path);
-                    if let Err(err) = result {
+                    let result = ws.active_doc_mut().map(|doc| ops::save_doc(doc, &path));
+                    if let Some(Err(err)) = result {
                         ws.notifications.push(ops::error_notification(&err));
                     }
                 }
-                None => {
-                    // Untitled (or no) active doc: Save behaves like Save As.
-                    if ws.active_doc().is_some() {
-                        request_dialog(
-                            &mut fx,
-                            app_state,
-                            AsyncFileDialogRequest::SaveDialogueAs {
-                                doc_index: ws.active,
-                            },
-                        );
-                    }
-                }
+                // Untitled (or no) active doc: Save behaves like Save As.
+                None => request_save_as(&mut fx, app_state, ws),
             }
         }
-        EditorAction::SaveAs => {
-            if ws.active_doc().is_some() {
-                request_dialog(
-                    &mut fx,
-                    app_state,
-                    AsyncFileDialogRequest::SaveDialogueAs {
-                        doc_index: ws.active,
-                    },
-                );
-            }
-        }
+        EditorAction::SaveAs => request_save_as(&mut fx, app_state, ws),
         EditorAction::CloseTab(index) => {
             if app_state.is_some_and(dialog_in_flight) {
                 return fx;
@@ -178,42 +147,24 @@ fn request_dialog(
     }
 }
 
+/// Requests the Save As dialog for the active doc; a no-op when no doc is open.
+fn request_save_as(fx: &mut ActionEffects, app_state: Option<&AppState>, ws: &Workspace) {
+    if ws.active_doc().is_some() {
+        request_dialog(
+            fx,
+            app_state,
+            AsyncFileDialogRequest::SaveDialogueAs {
+                doc_index: ws.active,
+            },
+        );
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::scenes::editor::testkit::{TempDir, fixture};
     use aberredengine::prelude::Vec2;
-    use std::path::PathBuf;
-
-    fn fixture(name: &str) -> PathBuf {
-        PathBuf::from(env!("CARGO_MANIFEST_DIR"))
-            .join("tests/fixtures")
-            .join(name)
-    }
-
-    /// A unique temp directory per test, removed on drop.
-    struct TempDir(PathBuf);
-
-    impl TempDir {
-        fn new(name: &str) -> Self {
-            let dir = std::env::temp_dir().join(format!(
-                "aberred-dialogue-actions-{}-{name}",
-                std::process::id()
-            ));
-            let _ = std::fs::remove_dir_all(&dir);
-            std::fs::create_dir_all(&dir).expect("create the temp dir");
-            Self(dir)
-        }
-
-        fn join(&self, name: &str) -> PathBuf {
-            self.0.join(name)
-        }
-    }
-
-    impl Drop for TempDir {
-        fn drop(&mut self) {
-            let _ = std::fs::remove_dir_all(&self.0);
-        }
-    }
 
     /// A workspace with one valid dirty doc (one node, so the engine gate passes).
     fn ws_with_dirty_valid_doc() -> Workspace {
@@ -324,7 +275,7 @@ mod tests {
 
     #[test]
     fn save_with_a_path_on_a_valid_doc_clears_dirty_and_writes_the_file() {
-        let tmp = TempDir::new("save-valid");
+        let tmp = TempDir::new("actions", "save-valid");
         let mut ws = ws_with_dirty_valid_doc();
         let out = tmp.join("out.json");
         ws.active_doc_mut().unwrap().path = Some(out.clone());
@@ -339,7 +290,7 @@ mod tests {
 
     #[test]
     fn save_with_a_path_on_an_invalid_doc_pushes_the_engine_message_and_writes_nothing() {
-        let tmp = TempDir::new("save-invalid");
+        let tmp = TempDir::new("actions", "save-invalid");
         let mut ws = Workspace::default();
         ops::open_path(&mut ws, &fixture("invalid_dangling.json")).expect("opens");
         let out = tmp.join("out.json");

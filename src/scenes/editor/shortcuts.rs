@@ -11,31 +11,28 @@ use super::actions::EditorAction;
 pub fn poll(ctx: &GuiCtx, active: Option<usize>, actions: &mut Vec<EditorAction>) {
     let ui = ctx.ui;
     let io = ui.io();
-    if io.want_text_input {
+    if io.want_text_input || !io.key_ctrl {
         return;
     }
-    let ctrl = io.key_ctrl;
-    let shift = io.key_shift;
-    if ctrl && ui.is_key_pressed(Key::N) {
-        actions.push(EditorAction::New);
-    }
-    if ctrl && ui.is_key_pressed(Key::O) {
-        actions.push(EditorAction::Open);
-    }
-    if ctrl && ui.is_key_pressed(Key::S) {
-        if shift {
-            actions.push(EditorAction::SaveAs);
-        } else {
-            actions.push(EditorAction::Save);
+    for (key, action) in [
+        (Key::N, EditorAction::New),
+        (Key::O, EditorAction::Open),
+        (Key::Q, EditorAction::Quit),
+    ] {
+        if ui.is_key_pressed(key) {
+            actions.push(action);
         }
     }
-    if ctrl
-        && ui.is_key_pressed(Key::W)
+    if ui.is_key_pressed(Key::S) {
+        actions.push(if io.key_shift {
+            EditorAction::SaveAs
+        } else {
+            EditorAction::Save
+        });
+    }
+    if ui.is_key_pressed(Key::W)
         && let Some(index) = active
     {
         actions.push(EditorAction::CloseTab(index));
-    }
-    if ctrl && ui.is_key_pressed(Key::Q) {
-        actions.push(EditorAction::Quit);
     }
 }

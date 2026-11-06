@@ -7,6 +7,7 @@
 //! the widgets are drawn, and a button click is applied with a fresh short lock. The Save As
 //! dialog request (untitled doc in the close modal) happens after that lock is released.
 
+use aberredengine::prelude::imgui::Ui;
 use aberredengine::prelude::*;
 
 use crate::ops;
@@ -29,6 +30,7 @@ enum ModalChoice {
 }
 
 /// Snapshot of the modal-relevant workspace state.
+#[derive(Default)]
 struct ModalSnap {
     /// First queued notification, if any.
     error: Option<String>,
@@ -38,23 +40,37 @@ struct ModalSnap {
 }
 
 fn snapshot(app_state: &AppState) -> ModalSnap {
-    let empty = ModalSnap {
-        error: None,
-        pending_close: None,
-        pending_quit: false,
-    };
-    let Some(handle) = app_state.get::<WorkspaceMutex>() else {
-        return empty;
-    };
-    let ws = handle.lock().unwrap();
-    ModalSnap {
-        error: ws.notifications.first().cloned(),
-        pending_close: ws
-            .pending_close
-            .filter(|index| *index < ws.docs.len())
-            .map(|index| (index, ops::doc_title(&ws.docs[index]))),
-        pending_quit: ws.pending_quit,
+    app_state
+        .get::<WorkspaceMutex>()
+        .map(|handle| {
+            let ws = handle.lock().unwrap();
+            ModalSnap {
+                error: ws.notifications.first().cloned(),
+                pending_close: ws
+                    .pending_close
+                    .filter(|index| *index < ws.docs.len())
+                    .map(|index| (index, ops::doc_title(&ws.docs[index]))),
+                pending_quit: ws.pending_quit,
+            }
+        })
+        .unwrap_or_default()
+}
+
+/// Opens `id` as a modal popup and runs `body` while it is open (no-op when it cannot open).
+fn with_modal(ui: &Ui, id: &str, body: impl FnOnce(&Ui)) {
+    ui.open_popup(id);
+    if let Some(_token) = ui.begin_modal_popup(id) {
+        body(ui);
     }
+}
+
+/// One modal button: records `choice` and closes the popup on click.
+fn choice_button(ui: &Ui, label: &str, choice: &mut Option<ModalChoice>, value: ModalChoice) {
+    if ui.button(label) {
+        *choice = Some(value);
+        ui.close_current_popup();
+    }
+    ui.same_line();
 }
 
 /// Draws at most one modal and applies its button choice. Returns `true` when quit was
@@ -64,59 +80,40 @@ pub fn draw(ctx: &mut GuiCtx) -> bool {
     let mut choice = None;
     let ui = ctx.ui;
     if let Some(message) = &snap.error {
-        ui.open_popup(ERROR_MODAL);
-        if let Some(_token) = ui.begin_modal_popup(ERROR_MODAL) {
+        with_modal(ui, ERROR_MODAL, |ui| {
             ui.text_wrapped(message);
             ui.separator();
-            if ui.button("OK") {
-                choice = Some(ModalChoice::ErrorOk);
-                ui.close_current_popup();
-            }
-        }
+            choice_button(ui, "OK", &mut choice, ModalChoice::ErrorOk);
+        });
     } else if let Some((_index, title)) = &snap.pending_close {
-        ui.open_popup(CLOSE_MODAL);
-        if let Some(_token) = ui.begin_modal_popup(CLOSE_MODAL) {
+        with_modal(ui, CLOSE_MODAL, |ui| {
             ui.text_wrapped(format!("\"{title}\" has unsaved changes."));
-            if ui.button("Save") {
-                choice = Some(ModalChoice::CloseSave);
-                ui.close_current_popup();
-            }
-            ui.same_line();
-            if ui.button("Discard") {
-                choice = Some(ModalChoice::CloseDiscard);
-                ui.close_current_popup();
-            }
-            ui.same_line();
-            if ui.button("Cancel") {
-                choice = Some(ModalChoice::CloseCancel);
-                ui.close_current_popup();
-            }
-        }
+            choice_button(ui, "Save", &mut choice, ModalChoice::CloseSave);
+            choice_button(ui, "Discard", &mut choice, ModalChoice::CloseDiscard);
+            choice_button(ui, "Cancel", &mut choice, ModalChoice::CloseCancel);
+        });
     } else if snap.pending_quit {
-        ui.open_popup(QUIT_MODAL);
-        if let Some(_token) = ui.begin_modal_popup(QUIT_MODAL) {
+        with_modal(ui, QUIT_MODAL, |ui| {
             ui.text_wrapped("There are unsaved changes.");
-            if ui.button("Discard and quit") {
-                choice = Some(ModalChoice::QuitDiscard);
-                ui.close_current_popup();
-            }
-            ui.same_line();
-            if ui.button("Cancel") {
-                choice = Some(ModalChoice::QuitCancel);
-                ui.close_current_popup();
-            }
-        }
+            choice_button(
+                ui,
+                "Discard and quit",
+                &mut choice,
+                ModalChoice::QuitDiscard,
+            );
+            choice_button(ui, "Cancel", &mut choice, ModalChoice::QuitCancel);
+        });
     }
-    apply_choice(ctx, choice)
+    apply_choice(ctx.app_state, choice)
 }
 
 /// Applies a modal button choice with a short workspace lock; the Save As dialog for an
 /// untitled doc is requested after the lock is dropped. Returns `true` for "Discard and quit".
-fn apply_choice(ctx: &GuiCtx, choice: Option<ModalChoice>) -> bool {
+fn apply_choice(app_state: &AppState, choice: Option<ModalChoice>) -> bool {
     let Some(choice) = choice else {
         return false;
     };
-    let Some(handle) = ctx.app_state.get::<WorkspaceMutex>().cloned() else {
+    let Some(handle) = app_state.get::<WorkspaceMutex>().cloned() else {
         return false;
     };
     let mut ws = handle.lock().unwrap();
@@ -127,13 +124,10 @@ fn apply_choice(ctx: &GuiCtx, choice: Option<ModalChoice>) -> bool {
             }
         }
         ModalChoice::CloseSave => {
-            let Some(index) = ws.pending_close else {
-                return false;
-            };
-            if index >= ws.docs.len() {
+            let Some(index) = ws.pending_close.filter(|index| *index < ws.docs.len()) else {
                 ws.pending_close = None;
                 return false;
-            }
+            };
             match ws.docs[index].path.clone() {
                 Some(path) => match ops::save_doc(&mut ws.docs[index], &path) {
                     Ok(()) => {
@@ -151,7 +145,7 @@ fn apply_choice(ctx: &GuiCtx, choice: Option<ModalChoice>) -> bool {
                     ws.pending_close = None;
                     drop(ws);
                     request_async_dialog(
-                        ctx.app_state,
+                        app_state,
                         AsyncFileDialogRequest::SaveDialogueAs { doc_index: index },
                     );
                 }

@@ -49,6 +49,11 @@ pub struct AsyncFileDialogState {
 /// `AppState` aliases the same `Arc`.
 pub type AsyncFileDialogMutex = Arc<Mutex<AsyncFileDialogState>>;
 
+/// A native dialog filtered to dialogue JSON files.
+fn dialogue_json_dialog() -> AsyncFileDialog {
+    AsyncFileDialog::new().add_filter("Dialogue JSON", &["json"])
+}
+
 /// Opens a native file dialog on a worker thread. If a dialog is already in flight (a receiver
 /// exists), the request is ignored; if `AsyncFileDialogMutex` is missing from `app_state`, warns
 /// and returns.
@@ -64,19 +69,15 @@ pub fn request_async_dialog(app_state: &AppState, request: AsyncFileDialogReques
     }
     // Build the rfd future on THIS (caller) thread; only block_on runs on the worker.
     let task: DialogTask = match request {
-        AsyncFileDialogRequest::OpenDialogue => Box::pin(
-            AsyncFileDialog::new()
-                .add_filter("Dialogue JSON", &["json"])
-                .pick_file()
-                .map(|handle| {
-                    handle.map(|file| AsyncFileDialogResult::OpenDialogue {
-                        path: file.path().to_path_buf(),
-                    })
-                }),
-        ),
+        AsyncFileDialogRequest::OpenDialogue => {
+            Box::pin(dialogue_json_dialog().pick_file().map(|handle| {
+                handle.map(|file| AsyncFileDialogResult::OpenDialogue {
+                    path: file.path().to_path_buf(),
+                })
+            }))
+        }
         AsyncFileDialogRequest::SaveDialogueAs { doc_index } => Box::pin(
-            AsyncFileDialog::new()
-                .add_filter("Dialogue JSON", &["json"])
+            dialogue_json_dialog()
                 .set_file_name("dialogue.json")
                 .save_file()
                 .map(move |handle| {
@@ -127,12 +128,6 @@ fn drain_completed(state: &mut AsyncFileDialogState) -> Option<AsyncFileDialogRe
     }
 }
 
-/// Locks the shared dialog state and drains it; the lock is released before returning.
-fn drain_shared(handle: &AsyncFileDialogMutex) -> Option<AsyncFileDialogResult> {
-    let mut state = handle.lock().unwrap();
-    drain_completed(&mut state)
-}
-
 /// Applies a finished dialog's result to `ws`. PURE (no ECS): every failure becomes one entry in
 /// `ws.notifications` for the GUI's error modal.
 pub fn apply_result(ws: &mut Workspace, result: AsyncFileDialogResult) {
@@ -159,7 +154,11 @@ pub fn poll_async_dialogs(app_state: Res<AppState>) {
     let Some(dialog_handle) = app_state.get::<AsyncFileDialogMutex>().cloned() else {
         return;
     };
-    let Some(result) = drain_shared(&dialog_handle) else {
+    let result = {
+        let mut state = dialog_handle.lock().unwrap();
+        drain_completed(&mut state)
+    };
+    let Some(result) = result else {
         return;
     };
     let Some(ws_handle) = app_state.get::<WorkspaceMutex>().cloned() else {
@@ -182,42 +181,21 @@ pub fn clear_async_dialog(app_state: &AppState) {
 #[cfg(test)]
 mod tests {
     use super::*;
-
-    fn fixture(name: &str) -> PathBuf {
-        PathBuf::from(env!("CARGO_MANIFEST_DIR"))
-            .join("tests/fixtures")
-            .join(name)
-    }
-
-    /// A unique temp directory per test, removed on drop.
-    struct TempDir(PathBuf);
-
-    impl TempDir {
-        fn new(name: &str) -> Self {
-            let dir = std::env::temp_dir().join(format!(
-                "aberred-dialogue-dialogs-{}-{name}",
-                std::process::id()
-            ));
-            let _ = std::fs::remove_dir_all(&dir);
-            std::fs::create_dir_all(&dir).expect("create the temp dir");
-            Self(dir)
-        }
-
-        fn join(&self, name: &str) -> PathBuf {
-            self.0.join(name)
-        }
-    }
-
-    impl Drop for TempDir {
-        fn drop(&mut self) {
-            let _ = std::fs::remove_dir_all(&self.0);
-        }
-    }
+    use crate::scenes::editor::testkit::{TempDir, fixture};
 
     fn open_guard_result() -> AsyncFileDialogResult {
         AsyncFileDialogResult::OpenDialogue {
             path: fixture("guard.json"),
         }
+    }
+
+    fn save_as_result(doc_index: usize, path: PathBuf) -> AsyncFileDialogResult {
+        AsyncFileDialogResult::SaveDialogueAs { doc_index, path }
+    }
+
+    /// State with `rx` as the in-flight dialog's receiver.
+    fn pending(rx: Receiver<Option<AsyncFileDialogResult>>) -> AsyncFileDialogState {
+        AsyncFileDialogState { receiver: Some(rx) }
     }
 
     #[test]
@@ -228,8 +206,7 @@ mod tests {
             "no handle inserted: nothing in flight"
         );
         let (tx, rx) = unbounded();
-        let handle: AsyncFileDialogMutex =
-            Arc::new(Mutex::new(AsyncFileDialogState { receiver: Some(rx) }));
+        let handle: AsyncFileDialogMutex = Arc::new(Mutex::new(pending(rx)));
         app_state.insert(handle);
         assert!(
             dialog_in_flight(&app_state),
@@ -244,7 +221,7 @@ mod tests {
     #[test]
     fn drain_completed_returns_the_result_and_clears_the_receiver() {
         let (tx, rx) = unbounded();
-        let mut state = AsyncFileDialogState { receiver: Some(rx) };
+        let mut state = pending(rx);
         tx.send(Some(open_guard_result())).unwrap();
         let drained = drain_completed(&mut state);
         assert!(
@@ -260,7 +237,7 @@ mod tests {
     #[test]
     fn drain_completed_cancel_clears_the_receiver_and_returns_none() {
         let (tx, rx) = unbounded();
-        let mut state = AsyncFileDialogState { receiver: Some(rx) };
+        let mut state = pending(rx);
         tx.send(None).unwrap(); // cancelled
         assert!(drain_completed(&mut state).is_none());
         assert!(state.receiver.is_none(), "a cancelled dialog is done too");
@@ -269,7 +246,7 @@ mod tests {
     #[test]
     fn drain_completed_empty_keeps_the_receiver() {
         let (_tx, rx) = unbounded();
-        let mut state = AsyncFileDialogState { receiver: Some(rx) };
+        let mut state = pending(rx);
         assert!(drain_completed(&mut state).is_none());
         assert!(
             state.receiver.is_some(),
@@ -281,7 +258,7 @@ mod tests {
     fn drain_completed_disconnected_clears_the_receiver() {
         let (tx, rx) = unbounded();
         drop(tx);
-        let mut state = AsyncFileDialogState { receiver: Some(rx) };
+        let mut state = pending(rx);
         assert!(drain_completed(&mut state).is_none());
         assert!(state.receiver.is_none());
     }
@@ -308,7 +285,7 @@ mod tests {
 
     #[test]
     fn apply_open_of_a_missing_file_pushes_a_notification_and_adds_no_doc() {
-        let tmp = TempDir::new("open-missing");
+        let tmp = TempDir::new("dialogs", "open-missing");
         let mut ws = Workspace::default();
         apply_result(
             &mut ws,
@@ -327,18 +304,12 @@ mod tests {
 
     #[test]
     fn apply_save_as_of_an_invalid_doc_pushes_the_engine_message_and_writes_nothing() {
-        let tmp = TempDir::new("save-invalid");
+        let tmp = TempDir::new("dialogs", "save-invalid");
         let mut ws = Workspace::default();
         ops::open_path(&mut ws, &fixture("invalid_dangling.json"))
             .expect("invalid fixtures still open");
         let out = tmp.join("out.json");
-        apply_result(
-            &mut ws,
-            AsyncFileDialogResult::SaveDialogueAs {
-                doc_index: 0,
-                path: out.clone(),
-            },
-        );
+        apply_result(&mut ws, save_as_result(0, out.clone()));
         assert_eq!(ws.notifications.len(), 1);
         let note = &ws.notifications[0];
         assert!(
@@ -354,7 +325,7 @@ mod tests {
 
     #[test]
     fn apply_save_as_success_marks_clean_and_sets_the_path() {
-        let tmp = TempDir::new("save-ok");
+        let tmp = TempDir::new("dialogs", "save-ok");
         let mut ws = Workspace::default();
         ops::open_path(&mut ws, &fixture("guard.json")).unwrap();
         let doc = ws.active_doc_mut().unwrap();
@@ -362,13 +333,7 @@ mod tests {
         assert!(doc.dirty, "renaming dirties the doc");
 
         let out = tmp.join("saved.json");
-        apply_result(
-            &mut ws,
-            AsyncFileDialogResult::SaveDialogueAs {
-                doc_index: 0,
-                path: out.clone(),
-            },
-        );
+        apply_result(&mut ws, save_as_result(0, out.clone()));
         assert!(ws.notifications.is_empty(), "a good save is silent");
         let doc = ws.active_doc().unwrap();
         assert!(!doc.dirty, "save-as marks the doc clean");
@@ -381,13 +346,7 @@ mod tests {
         let mut ws = Workspace::default();
         ops::open_path(&mut ws, &fixture("guard.json")).unwrap(); // doc 0
         ops::open_path(&mut ws, &fixture("loops.json")).unwrap(); // doc 1, active
-        apply_result(
-            &mut ws,
-            AsyncFileDialogResult::SaveDialogueAs {
-                doc_index: 1,
-                path: fixture("guard.json"),
-            },
-        );
+        apply_result(&mut ws, save_as_result(1, fixture("guard.json")));
         assert_eq!(ws.notifications.len(), 1);
         assert!(
             ws.notifications[0].contains("already open in another tab"),

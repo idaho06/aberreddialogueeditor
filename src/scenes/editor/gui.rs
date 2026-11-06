@@ -9,12 +9,9 @@ use crate::systems::file_dialogs::{dialog_in_flight, request_async_dialog};
 /// Scene GUI callback (render thread). Publishes imgui's capture flags into the shared `UiCapture`
 /// every frame so logic-side input systems can ignore mouse/keyboard while the GUI wants them,
 /// then draws the UI: menu, shortcuts, tab strip, Nodes window and modals. Menu/shortcut/tab
-/// intents are collected as [`actions::EditorAction`]s and applied in one place afterwards.
-///
-/// Lock discipline: the `WorkspaceMutex` is locked only for short snapshots and per action, and
-/// never while dialog code runs — `apply_action` is called with `app_state: None` under the
-/// lock, so a dialog request comes back in [`actions::ActionEffects::dialog`] and is dispatched
-/// after the guard is dropped.
+/// intents are collected as [`actions::EditorAction`]s and applied in one place afterwards, under
+/// the lock discipline documented in [`actions`]: `apply_action` runs with `app_state: None`
+/// under the workspace lock, and the returned dialog request is dispatched after the guard drops.
 pub fn gui(ctx: &mut GuiCtx) {
     if let Some(capture) = ctx.app_state.get::<UiCaptureHandle>() {
         capture
