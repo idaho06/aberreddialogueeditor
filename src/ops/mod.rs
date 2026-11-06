@@ -170,8 +170,36 @@ mod tests {
         }
     }
 
+    /// `path.canonicalize()`, for comparing against the canonical paths ops stores on docs.
+    fn canon(path: &Path) -> PathBuf {
+        path.canonicalize().expect("the fixture exists")
+    }
+
     fn open_guard(ws: &mut Workspace) -> OpenOutcome {
         open_path(ws, &fixture("guard.json")).expect("guard.json opens")
+    }
+
+    /// Asserts the variant message and the Display text of `err` both contain `needle`.
+    fn assert_err_contains(err: &OpError, needle: &str) {
+        let msg = match err {
+            OpError::Io(msg) | OpError::Json(msg) | OpError::Invalid(msg) => msg,
+        };
+        assert!(
+            msg.contains(needle),
+            "the error message contains {needle:?}, got {err}"
+        );
+        assert!(
+            err.to_string().contains(needle),
+            "Display contains {needle:?}: {err}"
+        );
+    }
+
+    /// Reads a freshly saved file, asserting it ends with a newline and leaves no `.tmp` behind.
+    fn read_saved(path: &Path) -> String {
+        let text = std::fs::read_to_string(path).expect("the saved file exists");
+        assert!(text.ends_with('\n'), "the saved file ends with a newline");
+        assert!(!tmp_sibling(path).exists(), "no .tmp is left after saving");
+        text
     }
 
     #[test]
@@ -184,7 +212,7 @@ mod tests {
         assert!(!doc.dirty, "a freshly opened doc is clean");
         assert_eq!(
             doc.path,
-            Some(fixture("guard.json").canonicalize().unwrap()),
+            Some(canon(&fixture("guard.json"))),
             "open stores the canonical path"
         );
 
@@ -194,16 +222,10 @@ mod tests {
         assert!(!doc.dirty, "save marks the doc clean");
         assert_eq!(
             doc.path,
-            Some(save_path.canonicalize().unwrap()),
+            Some(canon(&save_path)),
             "save stores the canonical path of the saved file"
         );
-
-        let text = std::fs::read_to_string(&save_path).unwrap();
-        assert!(text.ends_with('\n'), "the saved file ends with a newline");
-        assert!(
-            !tmp_sibling(&save_path).exists(),
-            "no .tmp is left after a successful save"
-        );
+        read_saved(&save_path);
 
         let mut ws2 = Workspace::default();
         open_path(&mut ws2, &save_path).expect("the saved file reopens");
@@ -233,22 +255,19 @@ mod tests {
             ("invalid_dup_id.json", "duplicate dialogue node id"),
             ("invalid_no_start.json", "is not among the defined nodes"),
         ];
-        for (i, (name, needle)) in cases.iter().enumerate() {
-            let tmp = TempDir::new(&format!("gate-{i}"));
+        let tmp = TempDir::new("gate");
+        for (i, &(name, needle)) in cases.iter().enumerate() {
             let mut ws = Workspace::default();
             open_path(&mut ws, &fixture(name))
                 .expect("invalid fixtures still open: from_def is tolerant");
-            let save_path = tmp.join("out.json");
+            let save_path = tmp.join(&format!("out-{i}.json"));
             let err = save_doc(ws.active_doc_mut().unwrap(), &save_path)
                 .expect_err("the engine gate must block the save");
             assert!(
-                matches!(&err, OpError::Invalid(msg) if msg.contains(needle)),
-                "{name}: expected OpError::Invalid carrying the engine message {needle:?}, got {err}"
+                matches!(&err, OpError::Invalid(_)),
+                "{name}: expected OpError::Invalid, got {err}"
             );
-            assert!(
-                err.to_string().contains(needle),
-                "{name}: Display carries the engine message: {err}"
-            );
+            assert_err_contains(&err, needle);
             assert!(!save_path.exists(), "{name}: no file may be written");
             assert!(
                 !tmp_sibling(&save_path).exists(),
@@ -269,15 +288,15 @@ mod tests {
         assert_eq!(open_path(&mut ws, &guard).unwrap(), OpenOutcome::Focused);
         assert_eq!(ws.docs.len(), 1, "focusing must not add a doc");
 
-        let dotted = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("tests/./fixtures/guard.json");
+        let respelled = fixture("../fixtures/guard.json");
         assert_eq!(
-            open_path(&mut ws, &dotted).unwrap(),
+            open_path(&mut ws, &respelled).unwrap(),
             OpenOutcome::Focused,
             "a differently spelled path to the same file focuses the open doc"
         );
         assert_eq!(ws.docs.len(), 1);
         assert_eq!(ws.active, 0);
-        assert_eq!(ws.docs[0].path, Some(guard.canonicalize().unwrap()));
+        assert_eq!(ws.docs[0].path, Some(canon(&guard)));
 
         // Focusing from another tab switches active back to that doc.
         open_path(&mut ws, &fixture("loops.json")).unwrap();
@@ -293,9 +312,8 @@ mod tests {
         open_guard(&mut ws);
         // A stored path that is NOT canonical as a Path (a `..` component) but canonicalizes to
         // the same file: the raw find_by_path misses it, the canonicalized comparison must hit.
-        let non_canonical =
-            PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("tests/fixtures/../fixtures/guard.json");
-        assert_ne!(non_canonical, fixture("guard.json").canonicalize().unwrap());
+        let non_canonical = fixture("../fixtures/guard.json");
+        assert_ne!(non_canonical, canon(&fixture("guard.json")));
         ws.docs[0].path = Some(non_canonical);
         assert_eq!(
             open_path(&mut ws, &fixture("guard.json")).unwrap(),
@@ -312,21 +330,13 @@ mod tests {
         let bad = tmp.join("bad.json");
         std::fs::write(&bad, "{ this is not json").unwrap();
         let err = open_path(&mut ws, &bad).expect_err("invalid JSON must fail");
-        assert!(
-            matches!(&err, OpError::Json(msg) if msg.contains(&bad.display().to_string())),
-            "the Json error must name the path, got {err}"
-        );
-        assert!(
-            err.to_string().contains(&bad.display().to_string()),
-            "Display names the path: {err}"
-        );
+        assert!(matches!(&err, OpError::Json(_)), "must be Json, got {err}");
+        assert_err_contains(&err, &bad.display().to_string());
 
         let missing = tmp.join("missing.json");
         let err = open_path(&mut ws, &missing).expect_err("a missing file must fail");
-        assert!(
-            matches!(&err, OpError::Io(msg) if msg.contains("missing.json")),
-            "the Io error must name the path, got {err}"
-        );
+        assert!(matches!(&err, OpError::Io(_)), "must be Io, got {err}");
+        assert_err_contains(&err, "missing.json");
         assert!(ws.docs.is_empty(), "failed opens add no doc");
     }
 
@@ -334,16 +344,14 @@ mod tests {
     fn open_returns_the_docs_load_warnings() {
         let mut ws = Workspace::default();
         let outcome = open_path(&mut ws, &fixture("invalid_no_start.json")).unwrap();
-        match outcome {
-            OpenOutcome::Opened { warnings } => {
-                assert_eq!(
-                    warnings.len(),
-                    1,
-                    "the no_start fixture has one load warning"
-                )
-            }
-            OpenOutcome::Focused => panic!("expected Opened, got Focused"),
-        }
+        let OpenOutcome::Opened { warnings } = outcome else {
+            panic!("expected Opened, got {outcome:?}");
+        };
+        assert_eq!(
+            warnings.len(),
+            1,
+            "the no_start fixture has one load warning"
+        );
         assert_eq!(ws.active_doc().unwrap().load_warnings.len(), 1);
     }
 
@@ -360,14 +368,8 @@ mod tests {
         let save_path = tmp.join("out.json");
         save_doc(doc, &save_path).expect("the renamed doc still passes the gate");
         assert!(!doc.dirty, "a successful save clears dirty");
-        assert_eq!(doc.path, Some(save_path.canonicalize().unwrap()));
-        assert!(save_path.exists());
-        assert!(
-            !tmp_sibling(&save_path).exists(),
-            "the atomic write leaves no .tmp after success"
-        );
-        let text = std::fs::read_to_string(&save_path).unwrap();
-        assert!(text.ends_with('\n'));
+        assert_eq!(doc.path, Some(canon(&save_path)));
+        let text = read_saved(&save_path);
         assert!(
             text.contains("\"renamed\""),
             "the saved JSON has the new id"
