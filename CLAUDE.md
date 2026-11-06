@@ -94,6 +94,11 @@ All acceptance commands are `just` recipes (run from the repo root):
 - A frame with a clicked X ignores imgui's neighbour re-selection (`tabs::resolve_focus` drops the pending
   focus) and re-asserts the real active tab on the next frame (`LAST_ACTIVE` reset to `None`, so it is a
   `SET_SELECTED` frame).
+- Inspector edits (the fields typed in the Inspector window) are applied by
+  `scenes/editor::inspector::apply_edits` — the second deliberate place edits are applied, NOT through
+  `EditorAction`, because `apply_action` logs `{action:?}` which would leak node text. They are guarded by
+  `doc_id`: edits collected against a snapshot are applied only if the active doc is still the snapshotted one,
+  and the logging there emits only the edit kind and the node key, never the content.
 
 ## Logging
 
@@ -238,3 +243,23 @@ All acceptance commands are `just` recipes (run from the repo root):
   priority): the pure `CONTROLS: &[(&str, &str)]` list as two aligned columns, a separator and an OK button
   (`ModalChoice::ControlsOk`). Choice application is factored into the pure `apply_choice_ws(&mut Workspace, choice)` —
   `apply_choice` only locks, calls it and dispatches the returned `ChoiceEffect` (quit / Save As dialog) after the lock drops.
+
+## Inspector (plan 04 step 1a)
+
+- `src/scenes/editor/inspector/mod.rs` draws the "Inspector" window (a plain imgui window; position/size set only on
+  first use, top-right) showing the SELECTED node of the ACTIVE doc — "Nothing selected" (disabled text) without a
+  selection, "No document" without an open doc. It also holds the `Edit` enum (`SetId`/`SetSpeaker`/`SetText`/
+  `SetLabels`/`SetStart`) and the PURE `apply_edits(doc: &mut DialogueDoc, edits: &[Edit])`, which applies the edits
+  in order through the doc mutators (an edit for a vanished NodeKey is ignored by the mutators: no panic, no bump)
+  and logs only the edit KIND and the node key (`trace!` for the per-keystroke kinds, `debug!` for `SetStart`).
+- `src/scenes/editor/inspector/node_fields.rs` draws the widgets against a cloned `EdNode` and returns the requested
+  `Vec<Edit>`; `NodeFlags { is_start, duplicate_id, empty_id }` is computed in the snapshot from `doc.problems()`
+  (`is_start` = `doc.start == Some(key)`).
+- Per frame: lock the workspace briefly to snapshot the selected node (clone), its flags and `doc_id`, unlock; draw
+  the widgets with the guard dropped, emitting an edit ONLY when a widget reports a change; if there are edits, lock
+  again and apply them via `apply_edits` ONLY IF the active doc's `doc_id` still equals the snapshot's (otherwise
+  drop them). The lock is never held across widget calls.
+- Widget ids come from the NodeKey, never from the text: the whole panel body is wrapped in a `push_id` keyed by the
+  NodeKey and each label row pushes its index, so typing never changes a widget id (the input keeps focus).
+- Outputs and on-enter effects are read-only placeholder lines in this step ("Outputs: next" / "Outputs: choices (N)",
+  "On enter effects: N"); no outputs/choices/conditions/effects editing yet.

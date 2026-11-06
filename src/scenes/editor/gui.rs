@@ -2,14 +2,14 @@ use std::sync::atomic::Ordering;
 
 use aberredengine::prelude::*;
 
-use super::{actions, context_menu, menu, modals, nodes, shortcuts, tabs};
+use super::{actions, context_menu, inspector, menu, modals, nodes, shortcuts, tabs};
 use crate::state::{UiCaptureHandle, WorkspaceMutex};
 use crate::systems::file_dialogs::{dialog_in_flight, request_async_dialog};
 
 /// Scene GUI callback (render thread). Publishes imgui's capture flags into the shared `UiCapture`
 /// every frame so logic-side input systems can ignore mouse/keyboard while the GUI wants them,
-/// then draws the UI: menu, shortcuts, tab strip, Nodes window, the graph context menu and
-/// modals. Menu/shortcut/tab/context-menu intents are collected as [`actions::EditorAction`]s and
+/// then draws the UI: menu, shortcuts, tab strip, Nodes and Inspector windows, the graph context
+/// menu and modals. Menu/shortcut/tab/context-menu intents are collected as [`actions::EditorAction`]s and
 /// applied in one place afterwards, under
 /// the lock discipline documented in [`actions`]: `apply_action` runs with `app_state: None`
 /// under the workspace lock, and the returned dialog request is dispatched after the guard drops.
@@ -34,6 +34,7 @@ pub fn gui(ctx: &mut GuiCtx) {
     shortcuts::poll(ctx, active, &mut action_queue);
     tabs::draw(ctx, &mut action_queue);
     nodes::draw(ctx);
+    inspector::draw(ctx);
     context_menu::draw(ctx, &mut action_queue);
     let modal_quit = modals::draw(ctx);
 

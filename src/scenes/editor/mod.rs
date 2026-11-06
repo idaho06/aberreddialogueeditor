@@ -1,6 +1,7 @@
 mod actions;
 mod context_menu;
 mod gui;
+mod inspector;
 mod lifecycle;
 mod menu;
 mod modals;
