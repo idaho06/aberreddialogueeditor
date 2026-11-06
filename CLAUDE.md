@@ -178,3 +178,16 @@ All acceptance commands are `just` recipes (run from the repo root):
 - Tests are the `#[cfg(test)]` module in `interaction.rs`: one table of scripted `InputSample` sequences over
   `guard.json`/`invalid_dangling.json` (via `graph::fixtures` + `auto_layout`), plus zoom-radius, vanished-node and
   `drag_preview` tests. The later input system (`step 4b`) feeds samples and applies the returned `Action`s.
+
+## Graph input application (plan 03 step 4b)
+
+- `src/graph/apply.rs` (pure) maps `Action`s onto the doc mutators (`apply_actions -> Option<ContextMenuRequest>`);
+  `OpenContextMenu` becomes a `ContextMenuRequest { world, node }` (last one wins), stored in
+  `Workspace.pending_context_menu` for the GUI. Link changes log `link set`/`link cleared` at debug — events only.
+- `src/graph/input_system.rs` holds the `GraphInput` resource (`interaction`, `preview`, `last_doc_id`; inserted at
+  editor scene enter) and the pure `build_sample` (mouse world computed from the doc camera AFTER wheel/pan, never
+  `mouse_world_*`). `graph_frame_system` in `camera_system.rs` (7 params, one workspace lock) does wheel+middle-pan,
+  then `step` + `apply_actions` + preview/prev-mouse bookkeeping, then writes `MainCamera` last; a doc-id change
+  resets the interaction, and no active doc clears the preview and leaves the camera alone.
+- `src/graph/preview.rs` (`add_late_system`) keeps ONE `GraphPreview` bezier entity while `GraphInput.preview` is
+  Some — spawn on demand (also when the remembered entity died, e.g. scene switch), rewrite in place, despawn on None.

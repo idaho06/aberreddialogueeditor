@@ -1,24 +1,29 @@
 //! Graph-view logic: style constants, node geometry/hit testing, text wrap, camera math,
-//! layered auto-layout, pure node descriptions, projection planning and the pure mouse-gesture
-//! state machine. No imgui; the only ECS imports live in `components.rs` (markers + the
-//! `GraphEntities` resource), `projection.rs` (the ECS projection system) and `camera_system.rs`
-//! (the ECS camera system). All other files are pure — engine imports there are limited to
-//! `Vec2` and `Color`.
+//! layered auto-layout, pure node descriptions, projection planning, the pure mouse-gesture
+//! state machine and its pure action application. No imgui; the only ECS imports live in
+//! `components.rs` (markers + the `GraphEntities` resource), `input_system.rs` (the `GraphInput`
+//! resource + the sample builder), `camera_system.rs` (the ECS frame system), `projection.rs`
+//! (the ECS projection system) and `preview.rs` (the ECS drag-preview system). All other files
+//! are pure — engine imports there are limited to `Vec2` and `Color`.
 #![allow(dead_code, unused_imports)] // consumed by later plan steps
 
+mod apply;
 mod camera;
 mod camera_system;
 mod components;
 mod describe;
 mod frame;
 mod geometry;
+mod input_system;
 mod interaction;
 mod layout;
+mod preview;
 mod projection;
 mod projection_plan;
 mod style;
 mod wrap;
 
+pub use apply::apply_actions;
 pub use camera::{
     MAX_ZOOM, MIN_ZOOM, frame_all, pan_by_screen_delta, screen_to_world, world_to_screen, zoom_at,
 };
@@ -32,8 +37,10 @@ pub use geometry::{
     Hit, arrow_tip_dir, edge_curve, graph_bounds, hit_test, input_pin, node_height, node_rect,
     output_pin, rows,
 };
+pub use input_system::{ButtonSample, GraphInput, build_sample};
 pub use interaction::{Action, GraphInteraction, InputSample, Phase, drag_preview, step};
 pub use layout::auto_layout;
+pub use preview::graph_preview_system;
 pub use projection::{ARROWHEAD_L, ARROWHEAD_W, arrowhead_points, graph_projection_system};
 pub use projection_plan::{
     EdgeView, NodeSig, NodeView, ProjOp, RowSig, Shown, Snapshot, TargetKind, plan_projection,

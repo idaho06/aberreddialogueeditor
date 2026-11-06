@@ -98,7 +98,7 @@ fn slot_row(slot: Slot) -> usize {
 }
 
 /// The current [`Link`] of one output slot, if the node and slot both exist.
-fn link_at(doc: &DialogueDoc, key: NodeKey, slot: Slot) -> Option<Link> {
+pub(crate) fn link_at(doc: &DialogueDoc, key: NodeKey, slot: Slot) -> Option<Link> {
     let node = doc.node(key)?;
     match (&node.out, slot) {
         (Outputs::Next(link), Slot::Next) => Some(link.clone()),

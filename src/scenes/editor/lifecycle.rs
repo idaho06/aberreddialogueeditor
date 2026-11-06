@@ -1,11 +1,11 @@
 use aberredengine::core::resources::input_bindings::{InputBinding, InputBindings, MouseButton};
 use aberredengine::prelude::*;
 
-use crate::graph::GraphEntities;
+use crate::graph::{GraphEntities, GraphInput};
 
 /// Scene-enter observer for the `editor` scene: centres the camera on the render target, disables camera
 /// follow, rebinds `Action2` to the right mouse button only (its default is Enter OR right mouse), and
-/// inserts the graph projection's entity bookkeeping resource.
+/// inserts the graph projection's entity bookkeeping resource and the graph input resource.
 pub fn enter(
     _: On<SceneEntered>,
     mut commands: Commands,
@@ -19,6 +19,7 @@ pub fn enter(
     );
     commands.insert_resource(MainCamera(Camera2D::new(Vec2::ZERO, half)));
     commands.insert_resource(GraphEntities::default());
+    commands.insert_resource(GraphInput::default());
     follow.enabled = false;
     bindings.rebind(
         InputAction::Action2,

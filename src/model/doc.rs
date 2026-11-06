@@ -441,6 +441,15 @@ fn clear_link(link: &mut Link, deleted: NodeKey) {
     }
 }
 
+/// A request for the graph canvas's context menu, queued by the logic side (a right-click without
+/// movement) and drained by the GUI, which opens the popup. Defined in the model so neither side
+/// needs graph types: `world` is the canvas position of the press, `node` the hit node (if any).
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct ContextMenuRequest {
+    pub world: Vec2,
+    pub node: Option<NodeKey>,
+}
+
 /// All open documents plus the index of the active one. Shared between the render-thread GUI and
 /// logic-thread systems through [`crate::state::WorkspaceMutex`].
 #[derive(Debug, Clone, PartialEq, Default)]
@@ -457,6 +466,8 @@ pub struct Workspace {
     pub pending_close: Option<usize>,
     /// Set when quit was requested while any doc is dirty; the GUI shows a confirm modal.
     pub pending_quit: bool,
+    /// Pending graph context-menu request (right-click without movement); the GUI consumes it.
+    pub pending_context_menu: Option<ContextMenuRequest>,
 }
 
 impl Workspace {

@@ -10,5 +10,8 @@ mod doc;
 mod lint;
 
 pub use convert::{from_def, to_def};
-pub use doc::{CamState, DialogueDoc, EdChoice, EdNode, Link, NodeKey, Outputs, Slot, Workspace};
+pub use doc::{
+    CamState, ContextMenuRequest, DialogueDoc, EdChoice, EdNode, Link, NodeKey, Outputs, Slot,
+    Workspace,
+};
 pub use lint::{Problem, ProblemKind, Severity, engine_gate, has_errors, lint};

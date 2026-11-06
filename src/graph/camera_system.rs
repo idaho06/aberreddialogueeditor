@@ -1,19 +1,23 @@
-//! ECS camera system for the graph view: `graph_frame_system` (registered with `add_system`, runs in
-//! Update) makes `MainCamera` follow the ACTIVE doc's [`CamState`] every tick and applies wheel zoom
-//! and middle-mouse panning to it. The camera write lives in the plain function [`camera_update`]; the
-//! input math lives in the pure, unit-tested helpers [`apply_wheel`] and [`pan_step`]. Later steps
-//! extend this system with the rest of the graph input so that camera update and input run in a fixed
-//! order.
+//! ECS camera+input system for the graph view: `graph_frame_system` (registered with `add_system`,
+//! runs in Update) makes `MainCamera` follow the ACTIVE doc's [`CamState`] every tick, applies
+//! wheel zoom and middle-mouse panning to it, then feeds the mouse through the pure interaction
+//! state machine ([`step`]) and applies the returned [`Action`]s to the doc ([`apply_actions`]).
+//! The camera write lives in the plain function [`camera_update`]; the input math lives in the
+//! pure, unit-tested helpers [`apply_wheel`], [`pan_step`] and [`build_sample`].
 //!
-//! Lock discipline: the workspace is locked only for the short per-tick read/mutate of the active
-//! doc's camera. Mouse input is ignored while the GUI captures it (`UiCapture::mouse`), except a pan
-//! gesture already in progress, which continues.
+//! Lock discipline: the workspace is locked ONCE per tick, briefly, for the whole frame step —
+//! camera zoom/pan, sample building, `step`/`apply_actions` and the pending-request store all
+//! happen under that one lock. Mouse input is ignored while the GUI captures it
+//! (`UiCapture::mouse`), except a pan gesture already in progress, which continues.
 
 use std::sync::atomic::Ordering;
 
 use aberredengine::prelude::*;
 
-use super::{pan_by_screen_delta, zoom_at};
+use super::{
+    ButtonSample, GraphInput, GraphInteraction, apply_actions, build_sample, drag_preview,
+    pan_by_screen_delta, step, zoom_at,
+};
 use crate::model::CamState;
 use crate::state::{UiCaptureHandle, WorkspaceMutex};
 
@@ -52,14 +56,17 @@ pub fn camera_update(camera: &mut MainCamera, viewport: Vec2, cam: CamState) {
     camera.0 = Camera2D::new(cam.target, viewport / 2.0).with_zoom(cam.zoom);
 }
 
-/// Makes `MainCamera` follow the active doc's camera and handles wheel zoom and middle-mouse pan.
-/// With no active doc the camera is left alone.
+/// Makes `MainCamera` follow the active doc's camera, handles wheel zoom and middle-mouse pan,
+/// then runs one tick of the graph interaction state machine and applies its actions to the doc.
+/// With no active doc the camera is left alone and the interaction is reset.
 pub fn graph_frame_system(
     app_state: Res<AppState>,
     config: Res<GameConfig>,
     input: Res<InputState>,
     mut camera: ResMut<MainCamera>,
     mut pan_prev: Local<Option<Vec2>>,
+    mut graph_input: ResMut<GraphInput>,
+    mut prev_mouse: Local<Vec2>,
 ) {
     let viewport = Vec2::new(config.render_width as f32, config.render_height as f32);
     let mouse_captured = app_state
@@ -70,13 +77,18 @@ pub fn graph_frame_system(
     };
     let mut ws = handle.lock().unwrap();
     let Some(doc) = ws.active_doc_mut() else {
-        // No active doc: leave the camera alone (and drop any stale pan gesture).
+        // No active doc: no preview, no gesture, and the camera is left alone.
+        graph_input.preview = None;
+        graph_input.interaction = GraphInteraction::default();
+        graph_input.last_doc_id = 0;
         *pan_prev = None;
         return;
     };
+    // (a) Wheel zoom around the cursor and middle-mouse pan by screen-pixel delta (never
+    // `mouse_world_*`, which lags the camera by one tick). Both are ignored while the GUI
+    // captures the mouse, except a pan already in progress.
     let orig = doc.camera;
     let mut cam = orig;
-    // Wheel zoom around the cursor; ignored while the GUI captures the mouse.
     if !mouse_captured && input.scroll_y != 0.0 {
         cam = apply_wheel(
             &cam,
@@ -85,8 +97,6 @@ pub fn graph_frame_system(
             input.scroll_y,
         );
     }
-    // Middle-mouse pan by screen-pixel delta (never `mouse_world_*`, which lags the camera by one
-    // tick). A pan already in progress continues even when the GUI captures the mouse.
     let held = input.action(InputAction::Action3).active;
     let track = held && (!mouse_captured || pan_prev.is_some());
     let (prev, panned) = pan_step(
@@ -100,7 +110,45 @@ pub fn graph_frame_system(
     if cam != orig {
         doc.set_camera(cam);
     }
-    camera_update(&mut camera, viewport, cam);
+    // (b) One input sample, with the mouse world position computed from the doc camera as it is
+    // AFTER (a) — `input.mouse_world_*` would use the camera from before this tick's systems.
+    let mouse_screen = Vec2::new(input.mouse_x, input.mouse_y);
+    let left = input.mouse_left_button;
+    let right = input.action(InputAction::Action2);
+    let sample = build_sample(
+        mouse_screen,
+        ButtonSample {
+            active: left.active,
+            just_pressed: left.just_pressed,
+            just_released: left.just_released,
+        },
+        ButtonSample {
+            active: right.active,
+            just_pressed: right.just_pressed,
+            just_released: right.just_released,
+        },
+        mouse_captured,
+        &doc.camera,
+        viewport,
+    );
+    // A gesture never survives a tab switch.
+    if graph_input.last_doc_id != doc.doc_id {
+        graph_input.interaction = GraphInteraction::default();
+        graph_input.last_doc_id = doc.doc_id;
+    }
+    // (c) Run the state machine and apply its actions, still under the same lock; a returned
+    // context-menu request goes to the workspace for the GUI to consume.
+    let actions = step(&mut graph_input.interaction, doc, &sample, *prev_mouse);
+    let request = apply_actions(doc, &actions);
+    graph_input.preview = drag_preview(&graph_input.interaction, &sample);
+    *prev_mouse = mouse_screen;
+    let final_cam = doc.camera;
+    if let Some(request) = request {
+        ws.pending_context_menu = Some(request);
+    }
+    // (d) LAST: write MainCamera from the FINAL doc camera, so the drawn frame and the world
+    // coordinates used by the input agree.
+    camera_update(&mut camera, viewport, final_cam);
 }
 
 #[cfg(test)]
