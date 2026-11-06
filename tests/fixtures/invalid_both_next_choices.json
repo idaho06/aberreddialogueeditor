@@ -1,0 +1,12 @@
+{
+  "start": "a",
+  "nodes": [
+    {
+      "id": "a",
+      "text": "Sets both.",
+      "next": "b",
+      "choices": [{ "text": "Pick me.", "next": "b" }]
+    },
+    { "id": "b", "text": "Target." }
+  ]
+}

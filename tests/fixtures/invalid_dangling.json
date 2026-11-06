@@ -1,0 +1,14 @@
+{
+  "start": "a",
+  "nodes": [
+    { "id": "a", "text": "Leads nowhere.", "next": "ghost" },
+    {
+      "id": "b",
+      "text": "A choice to nowhere.",
+      "choices": [
+        { "text": "Into the void.", "next": "ghost2" },
+        { "text": "End." }
+      ]
+    }
+  ]
+}

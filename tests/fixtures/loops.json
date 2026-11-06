@@ -1,0 +1,67 @@
+{
+  "start": "a",
+  "nodes": [
+    {
+      "id": "a",
+      "speaker": "Loop",
+      "text": "Enter the loop.",
+      "labels": ["entry"],
+      "on_enter": [
+        { "type": "set_flag", "key": "entered" },
+        { "type": "remove_flag", "key": "stale" },
+        { "type": "set_integer", "key": "visits", "value": 0 },
+        { "type": "add_integer", "key": "gold", "delta": 5 },
+        { "type": "set_scalar", "key": "speed", "value": 1.5 },
+        { "type": "set_string", "key": "mood", "value": "curious" }
+      ],
+      "choices": [
+        { "text": "Go to b.", "next": "b" },
+        { "text": "Take the detour.", "next": "d" }
+      ]
+    },
+    {
+      "id": "b",
+      "text": "Loop body.",
+      "choices": [
+        {
+          "text": "Loop again.",
+          "next": "a",
+          "when": {
+            "type": "all",
+            "all": [
+              { "type": "flag", "key": "entered" },
+              { "type": "integer", "key": "visits", "op": "lt", "value": 3 },
+              {
+                "type": "not",
+                "cond": { "type": "string_equals", "key": "mood", "value": "angry" }
+              }
+            ]
+          },
+          "effects": [{ "type": "add_integer", "key": "visits", "delta": 1 }],
+          "labels": ["loop"]
+        },
+        {
+          "text": "Break out.",
+          "next": "c",
+          "when": {
+            "type": "any",
+            "any": [
+              { "type": "integer", "key": "gold", "op": "ge", "value": 10 },
+              { "type": "integer", "key": "gold", "op": "gt", "value": 100 },
+              { "type": "integer", "key": "gold", "op": "eq", "value": 5 },
+              { "type": "integer", "key": "gold", "op": "ne", "value": 0 },
+              { "type": "integer", "key": "gold", "op": "le", "value": 4 }
+            ]
+          }
+        }
+      ]
+    },
+    {
+      "id": "c",
+      "speaker": "End",
+      "text": "Joined here.",
+      "on_enter": [{ "type": "set_string", "key": "mood", "value": "done" }]
+    },
+    { "id": "d", "text": "Detour that also joins c.", "next": "c" }
+  ]
+}

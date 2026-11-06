@@ -1,0 +1,22 @@
+{
+  "start": "greet",
+  "nodes": [
+    {
+      "id": "greet",
+      "speaker": "Guard",
+      "text": "Halt! Who goes there?",
+      "choices": [
+        { "text": "A friend.", "next": "friend" },
+        {
+          "text": "Here is my pass.",
+          "next": "pass",
+          "when": { "type": "flag", "key": "has_pass" },
+          "effects": [{ "type": "set_flag", "key": "pass_shown" }]
+        },
+        { "text": "Never mind.", "labels": ["rude"] }
+      ]
+    },
+    { "id": "friend", "speaker": "Guard", "text": "Hm. Move along." },
+    { "id": "pass", "speaker": "Guard", "text": "Carry on.", "next": "friend" }
+  ]
+}

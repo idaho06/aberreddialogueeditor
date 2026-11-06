@@ -1,0 +1,8 @@
+{
+  "start": "x",
+  "nodes": [
+    { "id": "x", "text": "First x." },
+    { "id": "y", "text": "Links to x.", "next": "x" },
+    { "id": "x", "text": "Second x." }
+  ]
+}

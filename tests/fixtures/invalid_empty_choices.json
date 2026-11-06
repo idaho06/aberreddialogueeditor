@@ -1,0 +1,7 @@
+{
+  "start": "a",
+  "nodes": [
+    { "id": "a", "text": "Explicit empty choices.", "choices": [] },
+    { "id": "b", "text": "Points back.", "next": "a" }
+  ]
+}

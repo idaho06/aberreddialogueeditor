@@ -1,10 +1,12 @@
-//! Editor data model. Placeholder for now — the real dialogue document model arrives in the next step.
+//! Pure editor data model: a [`Workspace`] of open [`DialogueDoc`]s plus conversion to/from the engine's
+//! `DialogueDef`. No ECS, no imgui, no window — everything here is plain data and unit-testable.
+//!
+//! Engine imports are limited to `aberredengine::prelude::{DialogueDef, NodeDef, ChoiceDef,
+//! DialogueCondition, DialogueCmp, DialogueEffect, Vec2}`.
+#![allow(dead_code, unused_imports)] // consumed by later plan steps
 
-/// All open documents plus the active one. Shared between the render-thread GUI and logic-thread systems
-/// through [`crate::state::WorkspaceMutex`]. Placeholder fields are not read until the real model lands.
-#[derive(Default)]
-#[allow(dead_code)]
-pub struct Workspace {
-    pub docs: Vec<()>,
-    pub active: usize,
-}
+mod convert;
+mod doc;
+
+pub use convert::{from_def, to_def};
+pub use doc::{CamState, DialogueDoc, EdChoice, EdNode, Link, NodeKey, Outputs, Slot, Workspace};
