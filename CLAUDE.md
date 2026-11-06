@@ -120,3 +120,19 @@ All acceptance commands are `just` recipes (run from the repo root):
 - `describe.rs` (pure) turns an `EdNode` into a `NodeVisual` (texts/pins local to the node top-left);
   `projection_plan.rs` (pure) snapshots a doc (`snapshot_of`) and diffs it against `Shown`
   (`plan_projection` -> `ProjOp`s; edges are rewritten, never respawned, when a node moves).
+
+## Graph projection (plan 03 step 2b)
+
+- `src/graph/projection.rs` holds `graph_projection_system` — registered with `add_late_system` in `main.rs`,
+  with `GraphEntities::default()` inserted at editor scene enter (`lifecycle.rs`; that is enough, no `on_setup`
+  insert needed). It is the only graph file besides `components.rs` importing ECS types. Per tick it locks
+  `WorkspaceMutex` only to snapshot the active doc and clone what the plan needs, then unlocks before any
+  `Commands`/query call; when doc id, revision and metrics readiness are unchanged it returns without
+  snapshotting. `GraphEntities` now also carries `shown: Shown` (the `prev` side of the next diff).
+- Nodes spawn as a root (`GraphNode`, `WorldPosition`, `ZIndex`) with `GraphPart`/`ChildOf` children at local
+  positions: body `rounded_rect` (thick outline only when selected/error), header `rect`, `DynamicText` items
+  (dropped until font metrics arrive — `metrics_ready` is in the node sig, so nodes respawn when they land),
+  pin circles. `Shape::circle` is centred on its local origin, so pins need no `.with_origin`; `DynamicText`'s
+  position is its top-left. Edges are bezier entities at the source pin (control points relative to it) with one
+  arrowhead `GraphPart` child (`arrowhead_points`, pure + tested); `RewriteEdge` assigns position/shape only when
+  different. Logs `projection: N nodes, M edges` at debug on plans that change anything.

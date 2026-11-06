@@ -10,7 +10,7 @@ use aberredengine::bevy_ecs;
 use aberredengine::prelude::{Component, Entity, Resource, Vec2};
 use rustc_hash::FxHashMap;
 
-use crate::graph::projection_plan::NodeSig;
+use crate::graph::projection_plan::{NodeSig, Shown};
 use crate::model::{NodeKey, Slot};
 
 /// Marker on a node's root entity (the entity carrying its `WorldPosition`).
@@ -61,6 +61,8 @@ pub struct GraphEntities {
     pub shown_doc: Option<u64>,
     pub shown_revision: u64,
     pub metrics_ready: bool,
+    /// What the last executed plan drew — the `prev` side of the next `plan_projection` diff.
+    pub shown: Shown,
     pub nodes: FxHashMap<NodeKey, NodeEntry>,
     pub edges: FxHashMap<(NodeKey, Slot), EdgeEntry>,
 }

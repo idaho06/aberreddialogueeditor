@@ -1,8 +1,9 @@
 //! Graph-view logic: style constants, node geometry/hit testing, text wrap, camera math,
 //! layered auto-layout, pure node descriptions and projection planning. No imgui; the only
-//! ECS imports live in `components.rs` (markers + the `GraphEntities` resource). All other
-//! files are pure — engine imports there are limited to `Vec2` and `Color`.
-//! Interaction and the ECS projection system land in later plan steps.
+//! ECS imports live in `components.rs` (markers + the `GraphEntities` resource) and
+//! `projection.rs` (the ECS projection system). All other files are pure — engine imports
+//! there are limited to `Vec2` and `Color`.
+//! Interaction lands in later plan steps.
 #![allow(dead_code, unused_imports)] // consumed by later plan steps
 
 mod camera;
@@ -10,6 +11,7 @@ mod components;
 mod describe;
 mod geometry;
 mod layout;
+mod projection;
 mod projection_plan;
 mod style;
 mod wrap;
@@ -26,6 +28,7 @@ pub use geometry::{
     output_pin, rows,
 };
 pub use layout::auto_layout;
+pub use projection::{ARROWHEAD_L, ARROWHEAD_W, arrowhead_points, graph_projection_system};
 pub use projection_plan::{
     EdgeView, NodeSig, NodeView, ProjOp, RowSig, Shown, Snapshot, TargetKind, plan_projection,
     snapshot_of,
