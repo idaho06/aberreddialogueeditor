@@ -6,6 +6,10 @@
 //! Programmatic changes of `ws.active` (open/new/focus) must select the matching tab without
 //! flicker or fighting the user's click, so `TabItemFlags::SET_SELECTED` is passed only on the
 //! frame the active index changed, tracked in the `LAST_ACTIVE` thread-local.
+//!
+//! Tab ids are `###doc{doc_id}` (see [`tab_label`]), so a dirty star or a closed tab never
+//! changes a tab's imgui identity. A frame with a clicked X ignores imgui's neighbour
+//! re-selection (`resolve_focus`) and re-asserts the real active tab on the next frame.
 
 use std::cell::Cell;
 
@@ -28,8 +32,7 @@ fn snapshot(app_state: &AppState) -> Option<(Vec<String>, usize)> {
     let labels = ws
         .docs
         .iter()
-        .enumerate()
-        .map(|(index, doc)| tab_label(&ops::doc_title(doc), doc.dirty, index))
+        .map(|doc| tab_label(&ops::doc_title(doc), doc.dirty, doc.doc_id))
         .collect();
     Some((labels, ws.active))
 }
@@ -42,6 +45,18 @@ fn clicked_focus(select_frame: bool, active: usize, index: usize, selected: bool
         Some(index)
     } else {
         None
+    }
+}
+
+/// Resolves the tab focus after the strip was drawn. When a close button was clicked this frame
+/// (`closing`), imgui re-selects a neighbouring tab in the same frame and that tab reports
+/// selected — imgui's own re-selection, not a user click — so the pending focus is dropped and
+/// the second value asks the caller to re-assert the real active tab on the next frame.
+fn resolve_focus(focus: Option<usize>, closing: bool) -> (Option<usize>, bool) {
+    if closing {
+        (None, true)
+    } else {
+        (focus, false)
     }
 }
 
@@ -70,6 +85,7 @@ pub fn draw(ctx: &mut GuiCtx, actions: &mut Vec<EditorAction>) {
         | WindowFlags::NO_NAV_INPUTS
         | WindowFlags::NO_BRING_TO_FRONT_ON_FOCUS;
     let mut focus = None;
+    let mut closing = false;
     ui.window("##tabstrip")
         .flags(strip_flags)
         .position([0.0, menu_bar_height], Condition::Always)
@@ -93,11 +109,20 @@ pub fn draw(ctx: &mut GuiCtx, actions: &mut Vec<EditorAction>) {
                         focus = Some(clicked);
                     }
                     if !opened {
+                        closing = true;
                         actions.push(EditorAction::CloseTab(index));
                     }
                 }
             }
         });
+
+    // A clicked X makes imgui re-select a neighbour in this same frame; that report is not a
+    // click, so drop it and re-assert the real active tab on the next frame (LAST_ACTIVE reset
+    // makes it a SET_SELECTED frame, whose stale reports `clicked_focus` already ignores).
+    let (focus, reselect) = resolve_focus(focus, closing);
+    if reselect {
+        LAST_ACTIVE.with(|last| last.set(None));
+    }
 
     // Clicking a tab makes it active (brief re-lock; the widgets above are already drawn).
     if let Some(index) = focus
@@ -112,7 +137,19 @@ pub fn draw(ctx: &mut GuiCtx, actions: &mut Vec<EditorAction>) {
 
 #[cfg(test)]
 mod tests {
-    use super::clicked_focus;
+    use super::{clicked_focus, resolve_focus};
+
+    #[test]
+    fn closing_drops_a_pending_focus_and_requests_a_reselect() {
+        assert_eq!(resolve_focus(Some(1), true), (None, true));
+        assert_eq!(resolve_focus(None, true), (None, true));
+    }
+
+    #[test]
+    fn not_closing_passes_the_focus_through_and_requests_nothing() {
+        assert_eq!(resolve_focus(Some(1), false), (Some(1), false));
+        assert_eq!(resolve_focus(None, false), (None, false));
+    }
 
     #[test]
     fn select_frame_ignores_the_stale_selected_report() {

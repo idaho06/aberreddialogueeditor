@@ -72,11 +72,12 @@ pub struct ActionEffects {
     pub dialog: Option<AsyncFileDialogRequest>,
 }
 
-/// Tab label: the doc title, `*` when dirty, and a `##<index>` id suffix so that equal titles
-/// cannot collide in imgui's id stack.
-pub fn tab_label(title: &str, dirty: bool, index: usize) -> String {
+/// Tab label: the doc title, `*` when dirty, and a `###doc{doc_id}` suffix. Everything before
+/// `###` is display-only; imgui's id is always `doc{doc_id}`, so equal titles cannot collide and
+/// editing a doc (the dirty star) or closing a tab never changes a tab's identity.
+pub fn tab_label(title: &str, dirty: bool, doc_id: u64) -> String {
     let star = if dirty { "*" } else { "" };
-    format!("{title}{star}##{index}")
+    format!("{title}{star}###doc{doc_id}")
 }
 
 /// What closing a tab with the given dirty state requires.
@@ -284,15 +285,20 @@ mod tests {
     }
 
     #[test]
-    fn tab_label_appends_star_and_index_suffix() {
-        assert_eq!(tab_label("guard.json", false, 0), "guard.json##0");
-        assert_eq!(tab_label("guard.json", true, 2), "guard.json*##2");
-        assert_eq!(tab_label("Untitled", true, 1), "Untitled*##1");
+    fn tab_label_uses_a_stable_doc_id_after_the_hashes() {
+        assert_eq!(tab_label("guard.json", false, 7), "guard.json###doc7");
+        assert_eq!(tab_label("guard.json", true, 7), "guard.json*###doc7");
+        assert_eq!(tab_label("Untitled", true, 1), "Untitled*###doc1");
         assert_ne!(
-            tab_label("Untitled", false, 0),
             tab_label("Untitled", false, 1),
-            "equal titles must not collide"
+            tab_label("Untitled", false, 2),
+            "equal titles with different doc ids must not collide"
         );
+        // The id part (after ###) is identical whether the doc is dirty or clean.
+        let clean = tab_label("Untitled", false, 3);
+        let dirty = tab_label("Untitled", true, 3);
+        assert_eq!(clean.split("###").nth(1), Some("doc3"));
+        assert_eq!(clean.split("###").nth(1), dirty.split("###").nth(1));
     }
 
     #[test]

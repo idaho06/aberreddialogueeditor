@@ -88,6 +88,12 @@ All acceptance commands are `just` recipes (run from the repo root):
 - On the `SET_SELECTED` frame imgui still reports the previously selected tab as selected; `tabs::draw`
   ignores every tab's selected report on that frame (`clicked_focus`) — otherwise the active tab
   ping-pongs between the old and new tab on every frame.
+- Tab ids are `###doc{doc_id}` (`actions::tab_label`): everything before `###` is display-only, so a tab's
+  imgui id never depends on the title, the dirty star or the tab index — otherwise editing a doc (the
+  dirty star) or closing a tab would give the tab a new id and silently switch the active tab.
+- A frame with a clicked X ignores imgui's neighbour re-selection (`tabs::resolve_focus` drops the pending
+  focus) and re-asserts the real active tab on the next frame (`LAST_ACTIVE` reset to `None`, so it is a
+  `SET_SELECTED` frame).
 
 ## Logging
 
