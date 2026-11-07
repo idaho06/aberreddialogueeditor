@@ -10,7 +10,7 @@
 
 use aberredengine::prelude::*;
 
-use crate::graph::{auto_layout, frame_doc, screen_to_world};
+use crate::graph::{auto_layout, center_on, frame_doc, node_rect, screen_to_world};
 use crate::model::{NodeKey, Workspace};
 use crate::ops;
 use crate::systems::file_dialogs::{
@@ -60,6 +60,13 @@ pub enum EditorAction {
     SetStart(NodeKey),
     /// Delete key: remove the selected node, if any. No-op without an active doc or selection.
     DeleteSelected,
+    /// Problems panel row click: select the node and centre the camera on it (view-only:
+    /// `select` bumps `revision` but never sets `dirty`; `set_camera` bumps nothing). No-op
+    /// without an active doc or for an unknown node key.
+    FocusNode(NodeKey),
+    /// View > "Problems" / Ctrl+Shift+P / the Problems window's close button: toggle the
+    /// Problems window (the `Workspace.problems_hidden` flag). Works with and without a doc.
+    ToggleProblems,
 }
 
 /// Effects of an applied action that need more than the workspace itself.
@@ -223,6 +230,23 @@ pub fn apply_action(
             {
                 doc.delete_node(key);
             }
+        }
+        EditorAction::FocusNode(key) => {
+            // No active doc or unknown key: no-op.
+            if let Some(doc) = ws.active_doc_mut() {
+                let centre = doc.node(key).map(|node| {
+                    let (min, max) = node_rect(node);
+                    (min + max) / 2.0
+                });
+                if let Some(centre) = centre {
+                    doc.select(Some(key));
+                    let camera = doc.camera;
+                    doc.set_camera(center_on(&camera, centre));
+                }
+            }
+        }
+        EditorAction::ToggleProblems => {
+            ws.problems_hidden = !ws.problems_hidden;
         }
     }
     log::debug!(
@@ -414,11 +438,22 @@ mod tests {
         assert!(fx.dialog.is_none() && !fx.quit);
         assert_eq!(ws.notifications.len(), 1);
         let note = &ws.notifications[0];
-        assert!(
-            note.contains("dialogue node \"a\" links to unknown node \"ghost\""),
-            "the engine's own message: {note}"
+        assert_eq!(
+            note.kind,
+            crate::model::NotificationKind::SaveRejected,
+            "an engine-gate rejection from Save is a SaveRejected notification"
         );
-        assert!(!note.starts_with("invalid dialogue"), "no prefix: {note}");
+        assert!(
+            note.message
+                .contains("dialogue node \"a\" links to unknown node \"ghost\""),
+            "the engine's own message: {}",
+            note.message
+        );
+        assert!(
+            !note.message.starts_with("invalid dialogue"),
+            "no prefix: {}",
+            note.message
+        );
         assert!(!out.exists(), "the gate blocks the write");
         assert!(
             ws.active_doc().unwrap().path == Some(out),
@@ -728,10 +763,82 @@ mod tests {
             EditorAction::DeleteNode(NodeKey(1)),
             EditorAction::SetStart(NodeKey(1)),
             EditorAction::DeleteSelected,
+            EditorAction::FocusNode(NodeKey(1)),
         ] {
             let fx = apply_action(&mut ws, action, None);
             assert!(fx.dialog.is_none() && !fx.quit, "{action:?}");
             assert!(ws.docs.is_empty(), "{action:?}: nothing happened");
         }
+    }
+
+    #[test]
+    fn focus_node_selects_the_node_and_centres_the_camera_without_dirtying() {
+        let (mut ws, a, b) = ws_with_two_linked_nodes();
+        {
+            let doc = ws.active_doc_mut().unwrap();
+            doc.set_camera(CamState {
+                target: Vec2::new(999.0, -999.0),
+                zoom: 2.5,
+            });
+            doc.select(None);
+            doc.mark_clean();
+        }
+        let revision = ws.active_doc().unwrap().revision;
+        let fx = apply_action(&mut ws, EditorAction::FocusNode(b), None);
+        assert!(fx.dialog.is_none() && !fx.quit);
+        let doc = ws.active_doc().unwrap();
+        assert_eq!(doc.selected, Some(b), "the node is selected");
+        let (min, max) = crate::graph::node_rect(doc.node(b).unwrap());
+        let centre = (min + max) / 2.0;
+        assert_eq!(
+            doc.camera.target, centre,
+            "the camera targets the node centre"
+        );
+        assert!(
+            (doc.camera.zoom - 2.5).abs() < 1e-6,
+            "the zoom is unchanged"
+        );
+        assert!(!doc.dirty, "FocusNode is view-only: never dirty");
+        assert_eq!(
+            doc.revision,
+            revision + 1,
+            "select bumps revision once; set_camera bumps nothing"
+        );
+
+        // Unknown key: a no-op (no selection change, no revision bump).
+        let revision = doc.revision;
+        let fx = apply_action(&mut ws, EditorAction::FocusNode(NodeKey(999)), None);
+        assert!(fx.dialog.is_none() && !fx.quit);
+        let doc = ws.active_doc().unwrap();
+        assert_eq!(doc.selected, Some(b), "the selection is untouched");
+        assert_eq!(doc.camera.target, centre, "the camera is untouched");
+        assert_eq!(doc.revision, revision, "an unknown key is a no-op");
+        assert!(!doc.dirty);
+
+        // The other node focuses too.
+        apply_action(&mut ws, EditorAction::FocusNode(a), None);
+        let doc = ws.active_doc().unwrap();
+        assert_eq!(doc.selected, Some(a));
+        let (min, max) = crate::graph::node_rect(doc.node(a).unwrap());
+        assert_eq!(doc.camera.target, (min + max) / 2.0);
+    }
+
+    #[test]
+    fn toggle_problems_flips_the_visibility_flag_and_works_without_a_doc() {
+        let mut ws = Workspace::default();
+        assert!(
+            !ws.problems_hidden,
+            "the Problems window is visible by default"
+        );
+        let fx = apply_action(&mut ws, EditorAction::ToggleProblems, None);
+        assert!(fx.dialog.is_none() && !fx.quit);
+        assert!(ws.problems_hidden, "toggled: hidden");
+        assert!(ws.docs.is_empty(), "workspace-level: works without a doc");
+        apply_action(&mut ws, EditorAction::ToggleProblems, None);
+        assert!(!ws.problems_hidden, "toggled back: visible");
+
+        ops::new_doc(&mut ws);
+        apply_action(&mut ws, EditorAction::ToggleProblems, None);
+        assert!(ws.problems_hidden, "still works with an active doc");
     }
 }

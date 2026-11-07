@@ -8,6 +8,7 @@
 mod convert;
 mod doc;
 mod lint;
+mod notify;
 
 pub use convert::{from_def, to_def};
 pub use doc::{
@@ -15,3 +16,4 @@ pub use doc::{
     Workspace,
 };
 pub use lint::{Problem, ProblemKind, Severity, engine_gate, has_errors, lint};
+pub use notify::{Notification, NotificationKind};

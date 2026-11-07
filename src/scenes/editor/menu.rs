@@ -1,6 +1,7 @@
 //! The main menu bar. Menu items produce [`EditorAction`]s (applied later by
-//! [`crate::scenes::editor::gui`]): the File items, Edit > "Add node", View > "Re-layout" and
-//! "Frame all" (both enabled only with an active doc) and Help > "Controls" (always enabled).
+//! [`crate::scenes::editor::gui`]): the File items, Edit > "Add node", View > "Re-layout",
+//! "Frame all" (both enabled only with an active doc), View > "Problems" (a check-marked toggle,
+//! always enabled) and Help > "Controls" (always enabled).
 
 use aberredengine::prelude::imgui::Ui;
 use aberredengine::prelude::*;
@@ -15,9 +16,15 @@ fn item(ui: &Ui, label: &str, shortcut: &str, enabled: bool) -> bool {
         .build()
 }
 
-/// Draws the main menu bar. `active` is the workspace's active tab index when a doc is open.
-/// Menu clicks are pushed into `actions`; they are applied after the menu scope ends.
-pub fn draw(ctx: &mut GuiCtx, active: Option<usize>, actions: &mut Vec<EditorAction>) {
+/// Draws the main menu bar. `active` is the workspace's active tab index when a doc is open;
+/// `problems_visible` is the check mark of View > "Problems". Menu clicks are pushed into
+/// `actions`; they are applied after the menu scope ends.
+pub fn draw(
+    ctx: &mut GuiCtx,
+    active: Option<usize>,
+    problems_visible: bool,
+    actions: &mut Vec<EditorAction>,
+) {
     let ui = ctx.ui;
     let Some(_bar) = ui.begin_main_menu_bar() else {
         return;
@@ -65,6 +72,17 @@ pub fn draw(ctx: &mut GuiCtx, active: Option<usize>, actions: &mut Vec<EditorAct
             actions.push(EditorAction::FrameAll {
                 viewport: super::display_viewport(ui),
             });
+        }
+        ui.separator();
+        // Always enabled (workspace-level toggle); the check mark shows the window state.
+        if ui
+            .menu_item_config("Problems")
+            .shortcut("Ctrl+Shift+P")
+            .selected(problems_visible)
+            .enabled(true)
+            .build()
+        {
+            actions.push(EditorAction::ToggleProblems);
         }
     });
     ui.menu("Help", || {

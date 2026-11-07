@@ -9,6 +9,7 @@ use std::path::{Path, PathBuf};
 use aberredengine::prelude::{DialogueCondition, DialogueEffect, Vec2};
 
 use crate::model::lint::{Problem, Severity, lint};
+use crate::model::notify::Notification;
 
 /// Stable identifier of an [`EdNode`] within its doc. Keys are never reused: [`DialogueDoc::fresh_key`]
 /// only moves `next_key` forward.
@@ -473,9 +474,13 @@ pub struct Workspace {
     pub active: usize,
     /// Allocator for [`DialogueDoc::doc_id`]: the next id `add_doc` assigns (ids start at 1).
     pub next_doc_id: u64,
-    /// Error-modal queue for the GUI: each entry is one modal message (failed open/save, engine
-    /// save-gate rejections, ...). The GUI drains it.
-    pub notifications: Vec<String>,
+    /// Notification queue for the GUI's modal: each entry is one typed [`Notification`] (failed
+    /// open/save, engine save-gate rejections, ...). The GUI drains it one entry at a time.
+    pub notifications: Vec<Notification>,
+    /// The Problems window is visible by default; this flag stores the INVERSE (hidden), so the
+    /// derived `Default` (false) means "show the panel". Flipped by `EditorAction::ToggleProblems`
+    /// (View > "Problems", Ctrl+Shift+P, the window's close button).
+    pub problems_hidden: bool,
     /// Tab index whose close was requested while the doc is dirty; the GUI shows a confirm modal
     /// and either closes the tab or clears this.
     pub pending_close: Option<usize>,
@@ -947,6 +952,19 @@ mod tests {
         );
         ws.close_doc(0); // out of range: no-op
         assert_eq!(ws.docs.len(), 0);
+    }
+
+    #[test]
+    fn problems_panel_is_visible_by_default_and_notifications_start_empty() {
+        let ws = Workspace::default();
+        assert!(
+            !ws.problems_hidden,
+            "the derived Default must mean 'Problems window visible'"
+        );
+        assert!(
+            ws.notifications.is_empty(),
+            "a fresh workspace has no queued notifications"
+        );
     }
 
     #[test]

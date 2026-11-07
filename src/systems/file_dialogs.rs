@@ -16,7 +16,7 @@ use crossbeam_channel::{Receiver, TryRecvError, unbounded};
 use futures::FutureExt;
 use rfd::AsyncFileDialog;
 
-use crate::model::Workspace;
+use crate::model::{Notification, NotificationKind, Workspace};
 use crate::ops;
 use crate::state::WorkspaceMutex;
 
@@ -146,8 +146,11 @@ pub fn apply_result(ws: &mut Workspace, result: AsyncFileDialogResult) {
             log::debug!("applying dialog result: open {path:?}");
             // Load warnings are shown in the Nodes panel, not as notifications: ignore them.
             if let Err(err) = ops::open_path(ws, &path) {
-                log::warn!("dialog result open failed, notification pushed: {err}");
-                ws.notifications.push(err.to_string());
+                log::warn!("dialog result open failed, error notification pushed: {err}");
+                ws.notifications.push(Notification {
+                    kind: NotificationKind::Error,
+                    message: err.to_string(),
+                });
             }
         }
         AsyncFileDialogResult::SaveDialogueAs { doc_index, path } => {
@@ -155,7 +158,12 @@ pub fn apply_result(ws: &mut Workspace, result: AsyncFileDialogResult) {
             // The engine's own message goes to the modal without the "invalid dialogue: " prefix.
             if let Err(err) = ops::save_doc_at(ws, doc_index, &path) {
                 let note = ops::error_notification(&err);
-                log::warn!("dialog result save as failed, notification pushed: {note}");
+                // Log the kind only: a SaveRejected message carries the engine's error text,
+                // which quotes node ids (document content) and must not reach the log.
+                log::warn!(
+                    "dialog result save as failed, notification pushed: kind={:?}",
+                    note.kind
+                );
                 ws.notifications.push(note);
             }
         }
@@ -310,10 +318,16 @@ mod tests {
         );
         assert!(ws.docs.is_empty(), "a failed open adds no doc");
         assert_eq!(ws.notifications.len(), 1);
+        let note = &ws.notifications[0];
+        assert_eq!(
+            note.kind,
+            NotificationKind::Error,
+            "an open failure is a plain error"
+        );
         assert!(
-            ws.notifications[0].contains("nope.json"),
+            note.message.contains("nope.json"),
             "the notification names the path: {}",
-            ws.notifications[0]
+            note.message
         );
     }
 
@@ -327,13 +341,21 @@ mod tests {
         apply_result(&mut ws, save_as_result(0, out.clone()));
         assert_eq!(ws.notifications.len(), 1);
         let note = &ws.notifications[0];
-        assert!(
-            note.contains("dialogue node \"a\" links to unknown node \"ghost\""),
-            "the notification is the engine's own message: {note}"
+        assert_eq!(
+            note.kind,
+            NotificationKind::SaveRejected,
+            "an engine-gate rejection from Save As is a SaveRejected notification"
         );
         assert!(
-            !note.starts_with("invalid dialogue"),
-            "no \"invalid dialogue: \" prefix: {note}"
+            note.message
+                .contains("dialogue node \"a\" links to unknown node \"ghost\""),
+            "the notification is the engine's own message: {}",
+            note.message
+        );
+        assert!(
+            !note.message.starts_with("invalid dialogue"),
+            "no \"invalid dialogue: \" prefix: {}",
+            note.message
         );
         assert!(!out.exists(), "a gated save writes no file");
     }
@@ -363,10 +385,16 @@ mod tests {
         ops::open_path(&mut ws, &fixture("loops.json")).unwrap(); // doc 1, active
         apply_result(&mut ws, save_as_result(1, fixture("guard.json")));
         assert_eq!(ws.notifications.len(), 1);
+        let note = &ws.notifications[0];
+        assert_eq!(
+            note.kind,
+            NotificationKind::Error,
+            "a tab collision is a plain error, not a save rejection"
+        );
         assert!(
-            ws.notifications[0].contains("already open in another tab"),
+            note.message.contains("already open in another tab"),
             "the notification explains the collision: {}",
-            ws.notifications[0]
+            note.message
         );
         assert_eq!(ws.docs.len(), 2, "no doc is added or removed");
         assert_eq!(

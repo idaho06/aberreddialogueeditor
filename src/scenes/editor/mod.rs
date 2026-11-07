@@ -6,7 +6,9 @@ mod lifecycle;
 mod menu;
 mod modals;
 mod nodes;
+mod problems;
 mod shortcuts;
+mod status;
 mod tabs;
 
 pub use gui::gui;

@@ -7,7 +7,9 @@ use std::path::{Path, PathBuf};
 use aberredengine::prelude::DialogueDef;
 
 use crate::graph::auto_layout;
-use crate::model::{DialogueDoc, Workspace, engine_gate, from_def, to_def};
+use crate::model::{
+    DialogueDoc, Notification, NotificationKind, Workspace, engine_gate, from_def, to_def,
+};
 
 /// What [`open_path`] did with the requested file.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -192,13 +194,21 @@ pub fn doc_title(doc: &DialogueDoc) -> String {
         .unwrap_or_else(|| "Untitled".to_owned())
 }
 
-/// The notification text for a failed operation, shown in the GUI's error modal:
-/// [`OpError::Invalid`] keeps only the engine's own message (no "invalid dialogue: " prefix);
-/// every other error uses its `Display` text.
-pub fn error_notification(err: &OpError) -> String {
+/// The typed notification for a failed operation, shown in the GUI's modal:
+/// [`OpError::Invalid`] (the engine save gate rejected the doc) becomes a
+/// [`NotificationKind::SaveRejected`] keeping only the engine's own message (no "invalid
+/// dialogue: " prefix), so the modal can use the "Cannot save" title and point at the Problems
+/// panel; every other error becomes a [`NotificationKind::Error`] with its `Display` text.
+pub fn error_notification(err: &OpError) -> Notification {
     match err {
-        OpError::Invalid(msg) => msg.clone(),
-        err => err.to_string(),
+        OpError::Invalid(msg) => Notification {
+            kind: NotificationKind::SaveRejected,
+            message: msg.clone(),
+        },
+        err => Notification {
+            kind: NotificationKind::Error,
+            message: err.to_string(),
+        },
     }
 }
 
@@ -574,17 +584,58 @@ mod tests {
     fn error_notification_keeps_only_the_engine_message_for_invalid() {
         let invalid =
             OpError::Invalid("dialogue node \"a\" links to unknown node \"b\"".to_owned());
+        let note = error_notification(&invalid);
         assert_eq!(
-            error_notification(&invalid),
-            "dialogue node \"a\" links to unknown node \"b\"",
+            note.kind,
+            NotificationKind::SaveRejected,
+            "an engine-gate rejection is a SaveRejected notification"
+        );
+        assert_eq!(
+            note.message, "dialogue node \"a\" links to unknown node \"b\"",
             "no \"invalid dialogue: \" prefix"
         );
         let io = OpError::Io("cannot read x.json: nope".to_owned());
-        assert_eq!(error_notification(&io), io.to_string());
+        let note = error_notification(&io);
+        assert_eq!(note.kind, NotificationKind::Error);
+        assert_eq!(note.message, io.to_string());
         let json = OpError::Json("cannot parse y.json: bad".to_owned());
-        assert_eq!(error_notification(&json), json.to_string());
+        let note = error_notification(&json);
+        assert_eq!(note.kind, NotificationKind::Error);
+        assert_eq!(note.message, json.to_string());
         let dup = OpError::AlreadyOpen("/tmp/z.json".to_owned());
-        assert_eq!(error_notification(&dup), dup.to_string());
+        let note = error_notification(&dup);
+        assert_eq!(note.kind, NotificationKind::Error);
+        assert_eq!(note.message, dup.to_string());
+    }
+
+    #[test]
+    fn error_notification_kinds_for_every_op_error_variant() {
+        let cases: [(OpError, NotificationKind); 4] = [
+            (
+                OpError::Io("cannot read x.json: nope".to_owned()),
+                NotificationKind::Error,
+            ),
+            (
+                OpError::Json("cannot parse y.json: bad".to_owned()),
+                NotificationKind::Error,
+            ),
+            (
+                OpError::Invalid("engine says no".to_owned()),
+                NotificationKind::SaveRejected,
+            ),
+            (
+                OpError::AlreadyOpen("/tmp/z.json".to_owned()),
+                NotificationKind::Error,
+            ),
+        ];
+        for (err, expected_kind) in cases {
+            let note = error_notification(&err);
+            assert_eq!(note.kind, expected_kind, "{err}");
+            match &err {
+                OpError::Invalid(msg) => assert_eq!(&note.message, msg),
+                _ => assert_eq!(note.message, err.to_string()),
+            }
+        }
     }
 
     #[test]

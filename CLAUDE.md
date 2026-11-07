@@ -49,6 +49,10 @@ All acceptance commands are `just` recipes (run from the repo root):
 - `src/model` is pure: plain data and functions, no imgui/ECS/window. Its only engine imports are
   `aberredengine::prelude::{DialogueDef, NodeDef, ChoiceDef, DialogueCondition, DialogueCmp, DialogueEffect,
   DialogueTree, DialogueError, Vec2}`.
+- The `Workspace` also carries the typed modal queue `notifications: Vec<Notification>` (`Notification`/
+  `NotificationKind` in `src/model/notify.rs`) and `problems_hidden`, the INVERSE visibility flag of the
+  Problems window (the derived `Default` = visible) — see "Problems panel, status bar, typed notifications"
+  below.
 - Every mutation on `DialogueDoc` goes through a named mutator that bumps `revision` and sets `dirty`;
   `set_node_pos`, `select` and `mark_clean` only bump `revision` (view-only, never saved), and
   `set_camera` bumps nothing at all — like the other view-only mutators it never sets `dirty`, and it
@@ -82,8 +86,8 @@ All acceptance commands are `just` recipes (run from the repo root):
 - Lock discipline: lock `WorkspaceMutex` only for short snapshots and per action, never while calling
   `request_async_dialog`/`dialog_in_flight` or any rfd code; widgets are drawn with the guard dropped.
 - Shortcuts are read with `ui.is_key_pressed(Key::..)` + `io().key_ctrl`/`key_shift`, only when
-  `!io().want_text_input`. Modals (error queue, unsaved-changes close/quit, Help > Controls) open from the frame's
-  top-level scope after the menu; one at a time, error modal first, the Controls modal last. While a native dialog is in flight, tab closes are
+  `!io().want_text_input`. Modals (the typed notification queue, unsaved-changes close/quit, Help > Controls) open from the frame's
+  top-level scope after the menu; one at a time, the notification modal first, the Controls modal last. While a native dialog is in flight, tab closes are
   ignored (a pending Save As is applied by tab index).
 - On the `SET_SELECTED` frame imgui still reports the previously selected tab as selected; `tabs::draw`
   ignores every tab's selected report on that frame (`clicked_focus`) — otherwise the active tab
@@ -106,7 +110,8 @@ All acceptance commands are `just` recipes (run from the repo root):
   `RUST_LOG=aberreddialogueeditor=debug just run`.
 - Log on events only (an action applied, a dialog result, a file operation, a lint-cache recompute) — never
   inside per-frame GUI paths.
-- What is logged where: file operations and outcomes in `ops`, dialog requests/results/notifications in
+- What is logged where: file operations and outcomes in `ops`, dialog requests/results and the typed
+  notifications they push (kind only — a SaveRejected message quotes node ids, so never its text) in
   `systems/file_dialogs.rs`, the inserted shared handles in `systems/setup.rs`, applied/ignored `EditorAction`s
   in `scenes/editor/actions.rs`, modal choices and outcomes in `scenes/editor/modals.rs`, `from_def` load
   warnings plus summary in `model/convert.rs`, and the lint-cache recompute (content_revision, error/warning counts)
@@ -331,3 +336,43 @@ All acceptance commands are `just` recipes (run from the repo root):
   condition, every effect kind and on-enter effects, and checks `engine_gate` is Ok,
   `to_def` -> `serde_json::to_string_pretty` -> `from_str::<DialogueDef>` equals the def, and
   `DialogueTree::try_from` of it succeeds.
+
+## Problems panel, status bar, typed notifications (plan 04 step 3)
+
+- `Workspace.notifications` is a queue of typed `Notification { kind, message }` (`src/model/notify.rs`,
+  exported from `model/mod.rs`): `NotificationKind::Error` for plain failures (io/json/already-open — the
+  `Display` text of the `OpError`) and `NotificationKind::SaveRejected` for `OpError::Invalid`, the engine
+  save-gate rejection, carrying ONLY the engine's own message. `ops::error_notification(&OpError) ->
+  Notification` builds them; the push sites are `scenes/editor/actions.rs` (Save), `scenes/editor/modals.rs`
+  (CloseSave failure) and `systems/file_dialogs.rs` (open / save-as results; open failures stay
+  `NotificationKind::Error` with the raw `Display` text).
+- The notification modal in `modals.rs` picks its title/id by kind via the pure `modal_title(kind) ->
+  &'static str`: `Error` keeps `"Error##modal"`; `SaveRejected` uses `"Cannot save: the engine would reject
+  this dialogue##modal"`, shows the engine message (wrapped) plus the dimmed line "See the Problems panel
+  for all issues." and an OK button. Priority order and lock discipline are unchanged; OK still removes
+  the first queued notification.
+- `scenes/editor/problems.rs` draws the "Problems" window (open by default — the flag is
+  `Workspace.problems_hidden`, so the derived `Default` means visible): a header "N errors, M warnings"
+  (red with errors, amber with warnings only, green "No problems" when clean), then an Errors group and a
+  Warnings group (pure `grouped_rows`: errors first, the lint order kept inside each group;
+  `problem_counts` = (errors, warnings)). Each row is a `selectable` with a coloured severity marker; row
+  ids come from `push_id_usize(index)` plus a fixed `###row` suffix, never from the message. Clicking a row
+  whose node still exists pushes `EditorAction::FocusNode(NodeKey)`; rows without a node or with a stale
+  key (e.g. a StartMissing naming a deleted node) are shown disabled. Load warnings sit below in a
+  collapsed "Load warnings (N)###loadwarn" header; "No document" (dim) without an open doc. A hidden
+  window must not be drawn at all — imgui's `p_open` only shows the close button and never hides a
+  window whose flag is already false, so `draw` early-returns on `!snap.visible` (`should_draw`).
+- `EditorAction::FocusNode(key)` (applied in `apply_action`): with an active doc and an existing node,
+  `doc.select(Some(key))` then `doc.set_camera(graph::center_on(&doc.camera, centre))` where `centre` is
+  the midpoint of `graph::node_rect(node)` — view-only: `select` bumps `revision` but never sets `dirty`,
+  `set_camera` bumps nothing; unknown key / no doc is a no-op. `center_on` is a pure helper in
+  `graph/camera.rs` (target = point, zoom unchanged).
+- Visibility of the Problems window: View > "Problems" (`menu_item_config("Problems").shortcut(
+  "Ctrl+Shift+P").selected(visible)`, always enabled), the Ctrl+Shift+P shortcut in `shortcuts.rs`
+  (pure `ctrl_shortcuts`, gated on `!want_text_input` like the rest) and the window's title-bar close
+  button all push `EditorAction::ToggleProblems`, which flips `ws.problems_hidden`.
+- `scenes/editor/status.rs` draws the status bar: a borderless window pinned to the bottom of the display
+  (the tab-strip window flags, position/size with `Condition::Always`, one line + padding high) showing
+  the path or "Untitled" with a `*` when dirty, "E errors / W warnings" coloured red/amber/green,
+  "N nodes" and "zoom 100%"; "No document" without a doc. The strings come from the pure, unit-tested
+  helpers `file_text` / `problems_text` / `nodes_text` / `zoom_text`.

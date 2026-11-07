@@ -25,6 +25,51 @@ fn plain_shortcuts(
     out
 }
 
+/// The pressed state of the Ctrl-modified shortcut keys, snapshotted from imgui in one place.
+#[derive(Debug, Clone, Copy, Default)]
+struct CtrlKeys {
+    n: bool,
+    o: bool,
+    q: bool,
+    s: bool,
+    w: bool,
+    p: bool,
+    shift: bool,
+}
+
+/// The Ctrl-modified shortcuts, decided purely from the key states: Ctrl+N/O/Q, Ctrl+S
+/// (Save) / Ctrl+Shift+S (Save As), Ctrl+W closes the active tab, and Ctrl+Shift+P toggles
+/// the Problems window (plain Ctrl+P without Shift does nothing). `active` is the workspace's
+/// active tab index when a doc is open (for Ctrl+W).
+fn ctrl_shortcuts(keys: CtrlKeys, active: Option<usize>) -> Vec<EditorAction> {
+    let mut out = Vec::new();
+    for (pressed, action) in [
+        (keys.n, EditorAction::New),
+        (keys.o, EditorAction::Open),
+        (keys.q, EditorAction::Quit),
+    ] {
+        if pressed {
+            out.push(action);
+        }
+    }
+    if keys.s {
+        out.push(if keys.shift {
+            EditorAction::SaveAs
+        } else {
+            EditorAction::Save
+        });
+    }
+    if keys.w
+        && let Some(index) = active
+    {
+        out.push(EditorAction::CloseTab(index));
+    }
+    if keys.p && keys.shift {
+        out.push(EditorAction::ToggleProblems);
+    }
+    out
+}
+
 /// Polls the shortcuts and pushes the matching [`EditorAction`]s. `active` is the workspace's
 /// active tab index when a doc is open (for Ctrl+W). Everything is gated on `!want_text_input`,
 /// so typing into a text box never triggers a shortcut.
@@ -45,27 +90,18 @@ pub fn poll(ctx: &GuiCtx, active: Option<usize>, actions: &mut Vec<EditorAction>
     if !io.key_ctrl {
         return;
     }
-    for (key, action) in [
-        (Key::N, EditorAction::New),
-        (Key::O, EditorAction::Open),
-        (Key::Q, EditorAction::Quit),
-    ] {
-        if ui.is_key_pressed(key) {
-            actions.push(action);
-        }
-    }
-    if ui.is_key_pressed(Key::S) {
-        actions.push(if io.key_shift {
-            EditorAction::SaveAs
-        } else {
-            EditorAction::Save
-        });
-    }
-    if ui.is_key_pressed(Key::W)
-        && let Some(index) = active
-    {
-        actions.push(EditorAction::CloseTab(index));
-    }
+    actions.extend(ctrl_shortcuts(
+        CtrlKeys {
+            n: ui.is_key_pressed(Key::N),
+            o: ui.is_key_pressed(Key::O),
+            q: ui.is_key_pressed(Key::Q),
+            s: ui.is_key_pressed(Key::S),
+            w: ui.is_key_pressed(Key::W),
+            p: ui.is_key_pressed(Key::P),
+            shift: io.key_shift,
+        },
+        active,
+    ));
 }
 
 #[cfg(test)]
@@ -104,5 +140,77 @@ mod tests {
         // Neither key: nothing.
         assert!(plain_shortcuts(false, false, false, viewport).is_empty());
         assert!(plain_shortcuts(false, false, true, viewport).is_empty());
+    }
+
+    /// A `CtrlKeys` with only the given keys pressed.
+    fn keys(n: bool, o: bool, q: bool, s: bool, w: bool, p: bool, shift: bool) -> CtrlKeys {
+        CtrlKeys {
+            n,
+            o,
+            q,
+            s,
+            w,
+            p,
+            shift,
+        }
+    }
+
+    #[test]
+    fn ctrl_shift_p_toggles_problems_and_plain_ctrl_p_does_nothing() {
+        // Ctrl+Shift+P toggles the Problems window.
+        assert_eq!(
+            ctrl_shortcuts(keys(false, false, false, false, false, true, true), None),
+            vec![EditorAction::ToggleProblems]
+        );
+        // Ctrl+P without Shift: no binding, nothing fires.
+        assert!(
+            ctrl_shortcuts(keys(false, false, false, false, false, true, false), None).is_empty()
+        );
+        // Ctrl+Shift+P alongside the others: everything fires, Problems last.
+        assert_eq!(
+            ctrl_shortcuts(keys(true, true, true, true, true, true, true), Some(2)),
+            vec![
+                EditorAction::New,
+                EditorAction::Open,
+                EditorAction::Quit,
+                EditorAction::SaveAs,
+                EditorAction::CloseTab(2),
+                EditorAction::ToggleProblems,
+            ]
+        );
+    }
+
+    #[test]
+    fn ctrl_shortcuts_keep_the_existing_bindings_unchanged() {
+        // Ctrl+S is Save, Ctrl+Shift+S is Save As.
+        assert_eq!(
+            ctrl_shortcuts(keys(false, false, false, true, false, false, false), None),
+            vec![EditorAction::Save]
+        );
+        assert_eq!(
+            ctrl_shortcuts(keys(false, false, false, true, false, false, true), None),
+            vec![EditorAction::SaveAs]
+        );
+        // Ctrl+W closes the active tab only when there is one.
+        assert_eq!(
+            ctrl_shortcuts(
+                keys(false, false, false, false, true, false, false),
+                Some(1)
+            ),
+            vec![EditorAction::CloseTab(1)]
+        );
+        assert!(
+            ctrl_shortcuts(keys(false, false, false, false, true, false, false), None).is_empty()
+        );
+        // N/O/Q in that order; nothing pressed -> nothing.
+        assert_eq!(
+            ctrl_shortcuts(keys(true, true, true, false, false, false, false), None),
+            vec![EditorAction::New, EditorAction::Open, EditorAction::Quit]
+        );
+        assert!(ctrl_shortcuts(CtrlKeys::default(), None).is_empty());
+        // Shift with Ctrl but no key: nothing.
+        assert!(
+            ctrl_shortcuts(keys(false, false, false, false, false, false, true), None).is_empty()
+        );
     }
 }

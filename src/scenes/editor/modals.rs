@@ -1,8 +1,8 @@
-//! Modal popups, opened from the frame's top-level scope after the menu scope: the error modal
-//! (first entry of `ws.notifications`), the "Unsaved changes" confirm for a pending tab close,
-//! the "Unsaved changes" confirm for a pending quit, and the Help > "Controls" modal
-//! (`ws.show_controls`). Only one shows at a time; priority is error, close, quit, then
-//! Controls (lowest).
+//! Modal popups, opened from the frame's top-level scope after the menu scope: the notification
+//! modal (first entry of `ws.notifications` — title chosen by its [`NotificationKind`]),
+//! the "Unsaved changes" confirm for a pending tab close, the "Unsaved changes" confirm for a
+//! pending quit, and the Help > "Controls" modal (`ws.show_controls`). Only one shows at a
+//! time; priority is notification, close, quit, then Controls (lowest).
 //!
 //! Locking: the workspace is locked to snapshot the modal state, the guard is dropped while
 //! the widgets are drawn, and a button click is applied with a fresh short lock. The Save As
@@ -11,15 +11,27 @@
 use aberredengine::prelude::imgui::Ui;
 use aberredengine::prelude::*;
 
-use crate::model::Workspace;
+use crate::model::{Notification, NotificationKind, Workspace};
 use crate::ops;
 use crate::state::WorkspaceMutex;
 use crate::systems::file_dialogs::{AsyncFileDialogRequest, request_async_dialog};
 
 const ERROR_MODAL: &str = "Error##modal";
+const SAVE_REJECTED_MODAL: &str = "Cannot save: the engine would reject this dialogue##modal";
 const CLOSE_MODAL: &str = "Unsaved changes##close";
 const QUIT_MODAL: &str = "Unsaved changes##quit";
 const CONTROLS_MODAL: &str = "Controls##help";
+
+/// The modal title/id for a notification of `kind`: a plain [`NotificationKind::Error`] keeps
+/// `"Error##modal"`; a [`NotificationKind::SaveRejected`] (the engine's save gate rejected the
+/// doc) uses the "Cannot save: ..." title. Everything before `###` is display-only, so the id
+/// part (`modal`) is stable across kinds.
+fn modal_title(kind: NotificationKind) -> &'static str {
+    match kind {
+        NotificationKind::Error => ERROR_MODAL,
+        NotificationKind::SaveRejected => SAVE_REJECTED_MODAL,
+    }
+}
 
 /// The Help > "Controls" modal body: `(action, input)` rows, drawn as two aligned columns.
 const CONTROLS: &[(&str, &str)] = &[
@@ -62,7 +74,7 @@ enum ModalChoice {
 #[derive(Default)]
 struct ModalSnap {
     /// First queued notification, if any.
-    error: Option<String>,
+    error: Option<Notification>,
     /// Pending close: tab index plus its title for the message.
     pending_close: Option<(usize, String)>,
     pending_quit: bool,
@@ -111,9 +123,13 @@ pub fn draw(ctx: &mut GuiCtx) -> bool {
     let snap = snapshot(ctx.app_state);
     let mut choice = None;
     let ui = ctx.ui;
-    if let Some(message) = &snap.error {
-        with_modal(ui, ERROR_MODAL, |ui| {
-            ui.text_wrapped(message);
+    if let Some(note) = &snap.error {
+        let id = modal_title(note.kind);
+        with_modal(ui, id, |ui| {
+            ui.text_wrapped(&note.message);
+            if note.kind == NotificationKind::SaveRejected {
+                ui.text_disabled("See the Problems panel for all issues.");
+            }
             ui.separator();
             choice_button(ui, "OK", &mut choice, ModalChoice::ErrorOk);
         });
@@ -265,6 +281,46 @@ fn apply_choice(app_state: &AppState, choice: Option<ModalChoice>) -> bool {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn modal_title_is_error_for_plain_errors_and_cannot_save_for_save_rejected() {
+        assert_eq!(modal_title(NotificationKind::Error), "Error##modal");
+        assert_eq!(
+            modal_title(NotificationKind::SaveRejected),
+            "Cannot save: the engine would reject this dialogue##modal"
+        );
+        // The imgui id part (after ##) is stable across kinds, only the title changes.
+        assert_eq!(
+            modal_title(NotificationKind::Error).split("##").nth(1),
+            Some("modal")
+        );
+        assert_eq!(
+            modal_title(NotificationKind::SaveRejected)
+                .split("##")
+                .nth(1),
+            Some("modal")
+        );
+    }
+
+    #[test]
+    fn error_ok_removes_the_first_notification_regardless_of_kind() {
+        let mut ws = Workspace::default();
+        ws.notifications.push(Notification {
+            kind: NotificationKind::SaveRejected,
+            message: "engine message".to_owned(),
+        });
+        ws.notifications.push(Notification {
+            kind: NotificationKind::Error,
+            message: "io error".to_owned(),
+        });
+        assert_eq!(
+            apply_choice_ws(&mut ws, ModalChoice::ErrorOk),
+            ChoiceEffect::Nothing
+        );
+        assert_eq!(ws.notifications.len(), 1, "the first entry is removed");
+        assert_eq!(ws.notifications[0].kind, NotificationKind::Error);
+        assert_eq!(ws.notifications[0].message, "io error");
+    }
 
     #[test]
     fn controls_ok_clears_the_show_controls_flag() {

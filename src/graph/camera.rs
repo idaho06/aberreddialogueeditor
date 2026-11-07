@@ -43,6 +43,14 @@ pub fn pan_by_screen_delta(cam: &CamState, delta_screen: Vec2) -> CamState {
     }
 }
 
+/// Camera that shows the world `point` at the screen centre; the zoom is unchanged.
+pub fn center_on(cam: &CamState, point: Vec2) -> CamState {
+    CamState {
+        target: point,
+        zoom: cam.zoom,
+    }
+}
+
 /// Zoom ratio that fits `size` world units into `avail` pixels; a zero-size axis never
 /// constrains the zoom.
 fn fit_ratio(avail: f32, size: f32) -> f32 {
@@ -136,6 +144,25 @@ mod tests {
             cam.target - Vec2::new(100.0, -40.0) / cam.zoom
         ));
         assert!((panned.zoom - cam.zoom).abs() < 1e-6);
+    }
+
+    #[test]
+    fn center_on_targets_the_point_and_keeps_the_zoom() {
+        let cam = cam(); // target (10, 20), zoom 2.0
+        let point = Vec2::new(-33.5, 77.25);
+        let centred = center_on(&cam, point);
+        assert!(close(centred.target, point), "target = point");
+        assert!((centred.zoom - cam.zoom).abs() < 1e-6, "zoom unchanged");
+        // The point really is at the screen centre afterwards.
+        let viewport = Vec2::new(800.0, 600.0);
+        assert!(close(
+            world_to_screen(&centred, viewport, point),
+            viewport / 2.0
+        ));
+        // The default camera works too.
+        let d = center_on(&CamState::default(), Vec2::new(5.0, 6.0));
+        assert!(close(d.target, Vec2::new(5.0, 6.0)));
+        assert!((d.zoom - 1.0).abs() < 1e-6);
     }
 
     #[test]

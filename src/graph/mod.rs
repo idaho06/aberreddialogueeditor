@@ -23,14 +23,14 @@ mod style;
 mod wrap;
 
 pub use apply::apply_actions;
-pub use camera::{frame_all, pan_by_screen_delta, screen_to_world, zoom_at};
+pub use camera::{center_on, frame_all, pan_by_screen_delta, screen_to_world, zoom_at};
 pub use camera_system::graph_frame_system;
 pub use components::{
     EdgeEntry, GraphEdge, GraphEntities, GraphNode, GraphPart, GraphPreview, NodeEntry,
 };
 pub use describe::describe_node;
 pub use frame::frame_doc;
-pub use geometry::{arrow_tip_dir, edge_curve, graph_bounds};
+pub use geometry::{arrow_tip_dir, edge_curve, graph_bounds, node_rect};
 pub use input_system::{ButtonSample, GraphInput, build_sample};
 pub use interaction::{GraphInteraction, drag_preview, step};
 pub use layout::auto_layout;

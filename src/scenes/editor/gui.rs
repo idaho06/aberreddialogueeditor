@@ -2,15 +2,17 @@ use std::sync::atomic::Ordering;
 
 use aberredengine::prelude::*;
 
-use super::{actions, context_menu, inspector, menu, modals, nodes, shortcuts, tabs};
+use super::{
+    actions, context_menu, inspector, menu, modals, nodes, problems, shortcuts, status, tabs,
+};
 use crate::state::{UiCaptureHandle, WorkspaceMutex};
 use crate::systems::file_dialogs::{dialog_in_flight, request_async_dialog};
 
 /// Scene GUI callback (render thread). Publishes imgui's capture flags into the shared `UiCapture`
 /// every frame so logic-side input systems can ignore mouse/keyboard while the GUI wants them,
-/// then draws the UI: menu, shortcuts, tab strip, Nodes and Inspector windows, the graph context
-/// menu and modals. Menu/shortcut/tab/context-menu intents are collected as [`actions::EditorAction`]s and
-/// applied in one place afterwards, under
+/// then draws the UI: menu, shortcuts, tab strip, Nodes, Inspector and Problems windows, the
+/// status bar, the graph context menu and modals. Menu/shortcut/tab/context-menu/problem-row
+/// intents are collected as [`actions::EditorAction`]s and applied in one place afterwards, under
 /// the lock discipline documented in [`actions`]: `apply_action` runs with `app_state: None`
 /// under the workspace lock, and the returned dialog request is dispatched after the guard drops.
 pub fn gui(ctx: &mut GuiCtx) {
@@ -23,18 +25,27 @@ pub fn gui(ctx: &mut GuiCtx) {
             .store(ctx.ui.io().want_capture_keyboard, Ordering::Relaxed);
     }
 
-    // Brief snapshot for the menu/shortcut enabled states; the guard is dropped immediately.
-    let active = ctx.app_state.get::<WorkspaceMutex>().and_then(|handle| {
-        let ws = handle.lock().unwrap();
-        ws.active_doc().is_some().then_some(ws.active)
-    });
+    // Brief snapshot for the menu/shortcut enabled states and the Problems check mark; the
+    // guard is dropped immediately.
+    let (active, problems_visible) =
+        ctx.app_state
+            .get::<WorkspaceMutex>()
+            .map_or((None, true), |handle| {
+                let ws = handle.lock().unwrap();
+                (
+                    ws.active_doc().is_some().then_some(ws.active),
+                    !ws.problems_hidden,
+                )
+            });
 
     let mut action_queue = Vec::new();
-    menu::draw(ctx, active, &mut action_queue);
+    menu::draw(ctx, active, problems_visible, &mut action_queue);
     shortcuts::poll(ctx, active, &mut action_queue);
     tabs::draw(ctx, &mut action_queue);
     nodes::draw(ctx);
     inspector::draw(ctx);
+    problems::draw(ctx, &mut action_queue);
+    status::draw(ctx);
     context_menu::draw(ctx, &mut action_queue);
     let modal_quit = modals::draw(ctx);
 
