@@ -150,8 +150,9 @@ All acceptance commands are `just` recipes (run from the repo root):
   the prelude, plus `use aberredengine::bevy_ecs;` so the derive macros' `bevy_ecs::..` paths resolve):
   markers `GraphNode`/`GraphEdge`/`GraphPart`/`GraphPreview` and the `GraphEntities` resource.
 - `describe.rs` (pure) turns an `EdNode` into a `NodeVisual` (texts/pins local to the node top-left);
-  `projection_plan.rs` (pure) snapshots a doc (`snapshot_of`) and diffs it against `Shown`
-  (`plan_projection` -> `ProjOp`s; edges are rewritten, never respawned, when a node moves).
+  `projection_plan.rs` (pure) snapshots a doc (`snapshot_of`, carrying `doc_id`/`revision`/`metrics_ready`)
+  and diffs it against the remembered `Snapshot` (`plan_projection` -> `ProjOp`s; edges are rewritten,
+  never respawned, when a node moves).
 
 ## Graph projection (plan 03 step 2b)
 
@@ -160,7 +161,9 @@ All acceptance commands are `just` recipes (run from the repo root):
   insert needed). It is the only graph file besides `components.rs` importing ECS types. Per tick it locks
   `WorkspaceMutex` only to snapshot the active doc and clone what the plan needs, then unlocks before any
   `Commands`/query call; when doc id, revision and metrics readiness are unchanged it returns without
-  snapshotting. `GraphEntities` also carries `shown: Shown` (the `prev` side of the next diff).
+  snapshotting. `GraphEntities` remembers the last executed plan as `shown: Snapshot` — the `prev` side of
+  the next diff, whose `(doc_id, revision, metrics_ready)` triple is the cheap-path key; its `nodes`/`edges`
+  maps hold only the spawned entities (node key -> root `Entity`, edge key -> bezier entity + arrowhead).
 - Nodes spawn as a root (`GraphNode`, `WorldPosition`, `ZIndex`) with `GraphPart`/`ChildOf` children at local
   positions: body `rounded_rect` (thick outline only when selected/error), header `rect`, `DynamicText` items
   (dropped until font metrics arrive — `metrics_ready` is in the node sig, so nodes respawn when they land),

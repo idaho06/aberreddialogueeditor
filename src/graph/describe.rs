@@ -160,7 +160,7 @@ pub fn describe_node(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::graph::fixtures::{DANGLING, GUARD, doc_from};
+    use crate::graph::fixtures::{DANGLING, GUARD, close, doc_from, node_at};
     use crate::model::NodeKey;
 
     /// Deterministic measure: 10 px per char.
@@ -168,20 +168,10 @@ mod tests {
         s.chars().count() as f32 * 10.0
     }
 
-    fn close(a: Vec2, b: Vec2) -> bool {
-        a.abs_diff_eq(b, 1e-5)
-    }
-
-    fn node(doc: &crate::model::DialogueDoc, key: NodeKey, pos: Vec2) -> EdNode {
-        let mut node = doc.node(key).expect("node exists").clone();
-        node.pos = pos;
-        node
-    }
-
     #[test]
     fn next_node_description() {
         let doc = doc_from(GUARD);
-        let friend = node(&doc, NodeKey(2), Vec2::new(100.0, 50.0)); // Next(End)
+        let friend = node_at(&doc, NodeKey(2), Vec2::new(100.0, 50.0)); // Next(End)
         let v = describe_node(&friend, false, false, false, &measure);
 
         assert!(close(
@@ -224,7 +214,7 @@ mod tests {
     #[test]
     fn three_choice_node_description_with_suffixes_and_pins() {
         let doc = doc_from(GUARD);
-        let greet = node(&doc, NodeKey(1), Vec2::new(10.0, 20.0)); // 3 choices
+        let greet = node_at(&doc, NodeKey(1), Vec2::new(10.0, 20.0)); // 3 choices
         let v = describe_node(&greet, true, false, false, &measure);
 
         assert_eq!(v.header_color, START_HEADER_COLOR, "is_start header");
@@ -270,7 +260,7 @@ mod tests {
     #[test]
     fn dangling_target_pin_is_red_and_next_row_says_next() {
         let doc = doc_from(DANGLING);
-        let a = node(&doc, NodeKey(1), Vec2::ZERO); // next -> "ghost" (dangling)
+        let a = node_at(&doc, NodeKey(1), Vec2::ZERO); // next -> "ghost" (dangling)
         let v = describe_node(&a, false, false, false, &measure);
         assert_eq!(v.texts.len(), 3);
         assert_eq!(v.texts[2].text, "next", "Dangling renders like a live next");
@@ -278,7 +268,7 @@ mod tests {
         assert_eq!(v.pins.len(), 2);
         assert_eq!(v.pins[1].color, PIN_DANGLING_COLOR);
 
-        let b = node(&doc, NodeKey(2), Vec2::ZERO); // choice 0 -> dangling, choice 1 -> End
+        let b = node_at(&doc, NodeKey(2), Vec2::ZERO); // choice 0 -> dangling, choice 1 -> End
         let v = describe_node(&b, false, false, false, &measure);
         assert_eq!(v.pins[1].color, PIN_DANGLING_COLOR, "choice 0 dangles");
         assert_eq!(v.pins[2].color, PIN_OUT_COLOR, "choice 1 ends");
@@ -289,7 +279,7 @@ mod tests {
     #[test]
     fn outline_priority_selected_over_error_over_normal() {
         let doc = doc_from(GUARD);
-        let friend = node(&doc, NodeKey(2), Vec2::ZERO);
+        let friend = node_at(&doc, NodeKey(2), Vec2::ZERO);
 
         let normal = describe_node(&friend, false, false, false, &measure);
         assert_eq!(normal.outline_color, OUTLINE_COLOR);
@@ -314,7 +304,7 @@ mod tests {
     #[test]
     fn long_texts_are_wrapped_and_truncated_by_measure() {
         let doc = doc_from(GUARD);
-        let friend = node(&doc, NodeKey(2), Vec2::ZERO);
+        let friend = node_at(&doc, NodeKey(2), Vec2::ZERO);
 
         let mut wide = friend.clone();
         wide.text = "x".repeat(100);

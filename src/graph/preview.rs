@@ -6,7 +6,8 @@
 
 use aberredengine::prelude::*;
 
-use super::{EDGE_SELECTED_COLOR, EDGE_THICKNESS, GraphInput, GraphPreview, Z_PREVIEW, edge_curve};
+use super::projection::{curve_shape, set_pos_if_changed, set_shape_if_changed};
+use super::{EDGE_SELECTED_COLOR, GraphInput, GraphPreview, Z_PREVIEW};
 
 /// Keeps the drag-preview entity in sync with [`GraphInput::preview`]. Runs late in the sim tick
 /// (`add_late_system`) so it sees this tick's input.
@@ -30,31 +31,21 @@ pub fn graph_preview_system(
     // the drag, or the old entity was despawned e.g. by a scene switch).
     let alive = (*entity).filter(|&e| positions.get(e).is_ok());
     let Some(e) = alive else {
-        let (c1, c2, to_rel) = edge_curve(from, to);
+        let (curve, ..) = curve_shape(from, to, EDGE_SELECTED_COLOR);
         *entity = Some(
             commands
                 .spawn((
                     GraphPreview,
                     ZIndex(Z_PREVIEW),
                     WorldPosition::from_vec(from),
-                    Shape::bezier(c1, c2, to_rel, EDGE_SELECTED_COLOR)
-                        .with_thickness(EDGE_THICKNESS),
+                    curve,
                 ))
                 .id(),
         );
         return;
     };
     // Rewrite position and shape in place, assigning only when different.
-    if let Ok(mut p) = positions.get_mut(e)
-        && p.pos != from
-    {
-        p.set_pos(from);
-    }
-    let (c1, c2, to_rel) = edge_curve(from, to);
-    let curve = Shape::bezier(c1, c2, to_rel, EDGE_SELECTED_COLOR).with_thickness(EDGE_THICKNESS);
-    if let Ok(mut s) = shapes.get_mut(e)
-        && *s != curve
-    {
-        *s = curve;
-    }
+    set_pos_if_changed(&mut positions, e, from);
+    let (curve, ..) = curve_shape(from, to, EDGE_SELECTED_COLOR);
+    set_shape_if_changed(&mut shapes, e, curve);
 }

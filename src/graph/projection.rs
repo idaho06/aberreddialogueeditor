@@ -13,12 +13,12 @@ use aberredengine::core::resources::font_metrics::{FontMetricsStore, FontMetrics
 use aberredengine::prelude::*;
 use rustc_hash::FxHashMap;
 
-use crate::graph::projection_plan::{EdgeView, ProjOp, Snapshot, is_structural};
+use crate::graph::projection_plan::{EdgeView, NodeView, ProjOp, Snapshot, is_structural};
 use crate::graph::{
     CORNER_RADIUS, EDGE_COLOR, EDGE_SELECTED_COLOR, EDGE_THICKNESS, EdgeEntry, FONT, FONT_SIZE,
-    GraphEdge, GraphEntities, GraphNode, GraphPart, HEADER_H, NODE_W, NodeEntry, NodeView,
-    OUTLINE_THICKNESS, PIN_R, Z_ARROWHEAD, Z_EDGE, Z_HEADER, Z_NODE_BODY, Z_PIN, Z_TEXT,
-    arrow_tip_dir, describe_node, edge_curve, plan_projection, snapshot_of,
+    GraphEdge, GraphEntities, GraphNode, GraphPart, HEADER_H, NODE_W, OUTLINE_THICKNESS, PIN_R,
+    Z_ARROWHEAD, Z_EDGE, Z_HEADER, Z_NODE_BODY, Z_PIN, Z_TEXT, arrow_tip_dir, describe_node,
+    edge_curve, plan_projection, snapshot_of,
 };
 use crate::model::{EdNode, NodeKey, Slot};
 use crate::state::WorkspaceMutex;
@@ -60,6 +60,61 @@ fn child_global(parent_world: Vec2, local: Vec2) -> GlobalTransform2D {
     }
 }
 
+/// Spawns one `GraphPart` child of `root` at `local` (relative to the root's world position
+/// `parent_world`), WITH a `GlobalTransform2D` (see [`child_global`]), and returns its entity.
+fn spawn_part<B: Bundle>(
+    commands: &mut Commands,
+    root: Entity,
+    parent_world: Vec2,
+    local: Vec2,
+    z: f32,
+    bundle: B,
+) -> Entity {
+    commands
+        .spawn((
+            GraphPart,
+            ChildOf(root),
+            WorldPosition::from_vec(local),
+            child_global(parent_world, local),
+            ZIndex(z),
+            bundle,
+        ))
+        .id()
+}
+
+/// The bezier edge curve from world `from` to world `to` as a `Shape`, plus the arrowhead inputs
+/// (`c2_rel` and `to_rel`, both relative to `from` — the edge entity's position).
+pub(super) fn curve_shape(from: Vec2, to: Vec2, color: Color) -> (Shape, Vec2, Vec2) {
+    let (c1, c2, to_rel) = edge_curve(from, to);
+    (
+        Shape::bezier(c1, c2, to_rel, color).with_thickness(EDGE_THICKNESS),
+        c2,
+        to_rel,
+    )
+}
+
+/// Assigns the entity's world position only when different (cheap change detection).
+pub(super) fn set_pos_if_changed(
+    positions: &mut Query<&mut WorldPosition>,
+    entity: Entity,
+    pos: Vec2,
+) {
+    if let Ok(mut p) = positions.get_mut(entity)
+        && p.pos != pos
+    {
+        p.set_pos(pos);
+    }
+}
+
+/// Assigns the entity's shape only when different (cheap change detection).
+pub(super) fn set_shape_if_changed(shapes: &mut Query<&mut Shape>, entity: Entity, shape: Shape) {
+    if let Ok(mut s) = shapes.get_mut(entity)
+        && *s != shape
+    {
+        *s = shape;
+    }
+}
+
 /// Draws the ACTIVE document and keeps the entities in sync with it. Runs late in the sim tick
 /// (`add_late_system`) so it sees this tick's edits.
 #[allow(clippy::too_many_arguments)]
@@ -85,16 +140,16 @@ pub fn graph_projection_system(
     };
 
     // Lock the workspace only to snapshot the active doc and clone what the plan needs.
-    let (snapshot, ops, revision, mut node_data) = {
+    let (snapshot, ops, mut node_data) = {
         let mut ws = handle.lock().unwrap();
         let (doc_id, revision) = match ws.active_doc() {
             Some(doc) => (doc.doc_id, doc.revision),
             None => (0, 0),
         };
         // Cheap path: nothing changed since the last executed plan — do not even snapshot.
-        if ents.shown_doc == Some(doc_id)
-            && ents.shown_revision == revision
-            && ents.metrics_ready == metrics_ready
+        if ents.shown.doc_id == doc_id
+            && ents.shown.revision == revision
+            && ents.shown.metrics_ready == metrics_ready
         {
             return;
         }
@@ -102,25 +157,27 @@ pub fn graph_projection_system(
             Some(doc) => snapshot_of(doc, metrics_ready),
             // No active doc: plan against an empty snapshot (despawns everything).
             None => Snapshot {
-                doc_id: 0,
                 metrics_ready,
-                nodes: Vec::new(),
-                edges: Vec::new(),
+                ..Snapshot::default()
             },
         };
         let ops = plan_projection(&ents.shown, &snapshot);
         // Clone the nodes the plan spawns/respawns (plus their view data) while still locked.
-        let doc = ws.active_doc();
+        let mut node_by_key: FxHashMap<NodeKey, &EdNode> = FxHashMap::default();
+        if let Some(doc) = ws.active_doc() {
+            node_by_key = doc.nodes.iter().map(|n| (n.key, n)).collect();
+        }
+        let view_by_key: FxHashMap<NodeKey, &NodeView> =
+            snapshot.nodes.iter().map(|n| (n.key, n)).collect();
         let mut node_data = FxHashMap::default();
         for op in &ops {
             if let ProjOp::SpawnNode(key) | ProjOp::RespawnNode(key) = op
-                && let Some(node) = doc.and_then(|d| d.node(*key)).cloned()
-                && let Some(view) = snapshot.nodes.iter().find(|n| n.key == *key)
+                && let (Some(node), Some(view)) = (node_by_key.get(key), view_by_key.get(key))
             {
-                node_data.insert(*key, (node, view.clone()));
+                node_data.insert(*key, ((*node).clone(), (*view).clone()));
             }
         }
-        (snapshot, ops, revision, node_data)
+        (snapshot, ops, node_data)
     }; // guard dropped: commands and queries only run from here on
 
     // Log only structural plans (spawn/despawn): a drag produces a MoveNode/RewriteEdge-only
@@ -133,11 +190,18 @@ pub fn graph_projection_system(
         );
     }
 
+    // Edge lookups by key, built once per plan execution.
+    let edge_by_key: FxHashMap<(NodeKey, Slot), &EdgeView> = snapshot
+        .edges
+        .iter()
+        .map(|e| ((e.from_key, e.slot), e))
+        .collect();
+
     for op in &ops {
         match *op {
             ProjOp::DespawnAll => {
-                for (_, entry) in ents.nodes.drain() {
-                    commands.entity(entry.root).despawn();
+                for (_, root) in ents.nodes.drain() {
+                    commands.entity(root).despawn();
                 }
                 for (_, entry) in ents.edges.drain() {
                     commands.entity(entry.entity).despawn();
@@ -147,38 +211,33 @@ pub fn graph_projection_system(
                 if matches!(op, ProjOp::RespawnNode(_))
                     && let Some(old) = ents.nodes.remove(&key)
                 {
-                    commands.entity(old.root).despawn();
+                    commands.entity(old).despawn();
                 }
                 if let Some((node, view)) = node_data.remove(&key) {
                     spawn_node(&mut commands, &mut ents, key, &node, &view, &measure);
                 }
             }
             ProjOp::MoveNode(key, pos) => {
-                if let Some(entry) = ents.nodes.get_mut(&key) {
-                    if let Ok(mut p) = positions.get_mut(entry.root)
-                        && p.pos != pos
-                    {
-                        p.set_pos(pos);
-                    }
-                    entry.pos = pos;
+                if let Some(&root) = ents.nodes.get(&key) {
+                    set_pos_if_changed(&mut positions, root, pos);
                 }
             }
             ProjOp::DespawnNode(key) => {
-                if let Some(entry) = ents.nodes.remove(&key) {
-                    commands.entity(entry.root).despawn();
+                if let Some(root) = ents.nodes.remove(&key) {
+                    commands.entity(root).despawn();
                 }
             }
             ProjOp::SpawnEdge(from_key, slot) => {
-                if let Some(ev) = find_edge(&snapshot, from_key, slot) {
+                if let Some(ev) = edge_by_key.get(&(from_key, slot)) {
                     spawn_edge(&mut commands, &mut ents, ev);
                 }
             }
             ProjOp::RewriteEdge(from_key, slot) => {
                 if let (Some(ev), Some(entry)) = (
-                    find_edge(&snapshot, from_key, slot),
-                    ents.edges.get_mut(&(from_key, slot)),
+                    edge_by_key.get(&(from_key, slot)),
+                    ents.edges.get(&(from_key, slot)),
                 ) {
-                    rewrite_edge(&mut shapes, &mut positions, ev, entry);
+                    rewrite_edge(&mut shapes, &mut positions, ev, entry.entity, entry.arrow);
                 }
             }
             ProjOp::DespawnEdge(from_key, slot) => {
@@ -189,18 +248,7 @@ pub fn graph_projection_system(
         }
     }
 
-    ents.shown.record(&snapshot);
-    ents.shown_doc = Some(snapshot.doc_id);
-    ents.shown_revision = revision;
-    ents.metrics_ready = metrics_ready;
-}
-
-/// The snapshot edge for `(from_key, slot)`.
-fn find_edge(snapshot: &Snapshot, from_key: NodeKey, slot: Slot) -> Option<&EdgeView> {
-    snapshot
-        .edges
-        .iter()
-        .find(|e| e.from_key == from_key && e.slot == slot)
+    ents.shown = snapshot;
 }
 
 /// Spawns one node: a root entity at `view.pos` plus `GraphPart` children at local positions.
@@ -234,90 +282,66 @@ fn spawn_node(
     if visual.outline_thick {
         body = body.with_thickness(OUTLINE_THICKNESS);
     }
-    commands.spawn((
-        GraphPart,
-        ChildOf(root),
-        WorldPosition::from_vec(Vec2::ZERO),
-        child_global(view.pos, Vec2::ZERO),
-        ZIndex(Z_NODE_BODY),
-        body,
-    ));
-    commands.spawn((
-        GraphPart,
-        ChildOf(root),
-        WorldPosition::from_vec(Vec2::ZERO),
-        child_global(view.pos, Vec2::ZERO),
-        ZIndex(Z_HEADER),
+    spawn_part(commands, root, view.pos, Vec2::ZERO, Z_NODE_BODY, body);
+    spawn_part(
+        commands,
+        root,
+        view.pos,
+        Vec2::ZERO,
+        Z_HEADER,
         Shape::rect(Vec2::new(NODE_W, HEADER_H), visual.header_color).filled(),
-    ));
+    );
     if view.sig.metrics_ready {
         for text in &visual.texts {
-            commands.spawn((
-                GraphPart,
-                ChildOf(root),
-                WorldPosition::from_vec(text.local),
-                child_global(view.pos, text.local),
-                ZIndex(Z_TEXT),
+            spawn_part(
+                commands,
+                root,
+                view.pos,
+                text.local,
+                Z_TEXT,
                 DynamicText::new(text.text.clone(), FONT, FONT_SIZE, text.color),
-            ));
+            );
         }
     }
     for pin in &visual.pins {
         // `Shape::circle` is centred on its local origin, so the pin's local position is its
         // centre — no `.with_origin` adjustment needed.
-        commands.spawn((
-            GraphPart,
-            ChildOf(root),
-            WorldPosition::from_vec(pin.local),
-            child_global(view.pos, pin.local),
-            ZIndex(Z_PIN),
+        spawn_part(
+            commands,
+            root,
+            view.pos,
+            pin.local,
+            Z_PIN,
             Shape::circle(PIN_R, pin.color).filled(),
-        ));
+        );
     }
 
-    ents.nodes.insert(
-        key,
-        NodeEntry {
-            root,
-            pos: view.pos,
-        },
-    );
+    ents.nodes.insert(key, root);
 }
 
 /// Spawns one edge at its source pin (world `from`) with one arrowhead child. The bezier control
 /// points and endpoint are relative to `from` (`Shape::bezier` is local to its entity).
 fn spawn_edge(commands: &mut Commands, ents: &mut GraphEntities, ev: &EdgeView) {
-    let (c1, c2, to_rel) = edge_curve(ev.from, ev.to);
     let color = edge_color(ev.selected_source);
+    let (curve, c2, to_rel) = curve_shape(ev.from, ev.to, color);
     let entity = commands
         .spawn((
             GraphEdge,
             WorldPosition::from_vec(ev.from),
             ZIndex(Z_EDGE),
-            Shape::bezier(c1, c2, to_rel, color).with_thickness(EDGE_THICKNESS),
+            curve,
         ))
         .id();
-    let arrow = commands
-        .spawn((
-            GraphPart,
-            ChildOf(entity),
-            WorldPosition::from_vec(Vec2::ZERO),
-            child_global(ev.from, Vec2::ZERO),
-            ZIndex(Z_ARROWHEAD),
-            Shape::polygon(&arrowhead_points(c2, to_rel), color).filled(),
-        ))
-        .id();
-    ents.edges.insert(
-        (ev.from_key, ev.slot),
-        EdgeEntry {
-            entity,
-            arrow,
-            from: ev.from,
-            to: ev.to,
-            selected_source: ev.selected_source,
-            target: ev.target,
-        },
+    let arrow = spawn_part(
+        commands,
+        entity,
+        ev.from,
+        Vec2::ZERO,
+        Z_ARROWHEAD,
+        Shape::polygon(&arrowhead_points(c2, to_rel), color).filled(),
     );
+    ents.edges
+        .insert((ev.from_key, ev.slot), EdgeEntry { entity, arrow });
 }
 
 /// Rewrites an existing edge in place (position, curve, arrowhead) — a node move never respawns
@@ -326,40 +350,24 @@ fn rewrite_edge(
     shapes: &mut Query<&mut Shape>,
     positions: &mut Query<&mut WorldPosition>,
     ev: &EdgeView,
-    entry: &mut EdgeEntry,
+    entity: Entity,
+    arrow: Entity,
 ) {
-    if let Ok(mut p) = positions.get_mut(entry.entity)
-        && p.pos != ev.from
-    {
-        p.set_pos(ev.from);
-    }
-    let (c1, c2, to_rel) = edge_curve(ev.from, ev.to);
     let color = edge_color(ev.selected_source);
-    let curve = Shape::bezier(c1, c2, to_rel, color).with_thickness(EDGE_THICKNESS);
-    if let Ok(mut s) = shapes.get_mut(entry.entity)
-        && *s != curve
-    {
-        *s = curve;
-    }
-    let arrow = Shape::polygon(&arrowhead_points(c2, to_rel), color).filled();
-    if let Ok(mut s) = shapes.get_mut(entry.arrow)
-        && *s != arrow
-    {
-        *s = arrow;
-    }
-    entry.from = ev.from;
-    entry.to = ev.to;
-    entry.selected_source = ev.selected_source;
-    entry.target = ev.target;
+    set_pos_if_changed(positions, entity, ev.from);
+    let (curve, c2, to_rel) = curve_shape(ev.from, ev.to, color);
+    set_shape_if_changed(shapes, entity, curve);
+    set_shape_if_changed(
+        shapes,
+        arrow,
+        Shape::polygon(&arrowhead_points(c2, to_rel), color).filled(),
+    );
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
-
-    fn close(a: Vec2, b: Vec2) -> bool {
-        a.abs_diff_eq(b, 1e-5)
-    }
+    use crate::graph::fixtures::close;
 
     #[test]
     fn child_global_composes_parent_world_and_local_offset() {

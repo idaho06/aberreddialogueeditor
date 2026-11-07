@@ -283,25 +283,14 @@ pub fn drag_preview(state: &GraphInteraction, s: &InputSample) -> Option<(Vec2, 
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::graph::fixtures::{DANGLING, GUARD, doc_from};
+    use crate::graph::fixtures::{DANGLING, FRIEND, GREET, PASS, doc_from, guard_doc};
     use crate::graph::geometry::input_pin;
     use crate::graph::layout::auto_layout;
     use crate::graph::style::{HEADER_H, NODE_W};
 
-    /// guard.json keys (1-based in node order): greet = 1 (3 choices), friend = 2 (Next(End)),
-    /// pass = 3 (Next(friend)).
-    const GREET: NodeKey = NodeKey(1);
-    const FRIEND: NodeKey = NodeKey(2);
-    const PASS: NodeKey = NodeKey(3);
     /// invalid_dangling.json keys: a = 1 (next -> Dangling), b = 2 (choice 0 -> Dangling).
     const A: NodeKey = NodeKey(1);
     const B: NodeKey = NodeKey(2);
-
-    fn guard_doc() -> DialogueDoc {
-        let mut doc = doc_from(GUARD);
-        auto_layout(&mut doc);
-        doc
-    }
 
     fn dangling_doc() -> DialogueDoc {
         let mut doc = doc_from(DANGLING);

@@ -24,7 +24,7 @@ pub struct GraphInput {
 }
 
 /// One button's raw state for a tick, mirroring the engine's `BoolState` fields.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
 pub struct ButtonSample {
     pub active: bool,
     pub just_pressed: bool,
@@ -74,12 +74,11 @@ mod tests {
             ButtonSample {
                 active: true,
                 just_pressed: true,
-                just_released: false,
+                ..ButtonSample::default()
             },
             ButtonSample {
-                active: false,
-                just_pressed: false,
                 just_released: true,
+                ..ButtonSample::default()
             },
             true,
             &cam,
@@ -110,16 +109,8 @@ mod tests {
         let screen = Vec2::new(400.0, 300.0); // the screen centre shows the target
         let sample = build_sample(
             screen,
-            ButtonSample {
-                active: false,
-                just_pressed: false,
-                just_released: false,
-            },
-            ButtonSample {
-                active: false,
-                just_pressed: false,
-                just_released: false,
-            },
+            ButtonSample::default(),
+            ButtonSample::default(),
             false,
             &cam,
             viewport,

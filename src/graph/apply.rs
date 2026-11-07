@@ -55,23 +55,10 @@ pub fn apply_actions(doc: &mut DialogueDoc, actions: &[Action]) -> Option<Contex
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::graph::fixtures::{GUARD, doc_from};
+    use crate::graph::fixtures::{FRIEND, GREET, PASS, guard_doc};
     use crate::graph::interaction::Action;
-    use crate::graph::layout::auto_layout;
     use crate::model::{CamState, NodeKey, Outputs, Slot};
     use aberredengine::prelude::Vec2;
-
-    /// guard.json keys (1-based in node order): greet = 1 (3 choices), friend = 2 (Next(End)),
-    /// pass = 3 (Next(friend)).
-    const GREET: NodeKey = NodeKey(1);
-    const FRIEND: NodeKey = NodeKey(2);
-    const PASS: NodeKey = NodeKey(3);
-
-    fn guard_doc() -> DialogueDoc {
-        let mut doc = doc_from(GUARD);
-        auto_layout(&mut doc);
-        doc
-    }
 
     #[test]
     fn move_select_and_pan_apply_to_the_doc_without_setting_dirty() {

@@ -121,27 +121,11 @@ pub fn graph_bounds(doc: &DialogueDoc) -> Option<(Vec2, Vec2)> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::graph::fixtures::{GUARD, doc_from};
-
-    /// guard.json: keys are 1-based in node order — greet(1, 3 choices), friend(2, Next(End)),
-    /// pass(3, Next(friend)).
-    fn guard_doc() -> DialogueDoc {
-        doc_from(GUARD)
-    }
-
-    fn close(a: Vec2, b: Vec2) -> bool {
-        a.abs_diff_eq(b, 1e-5)
-    }
-
-    fn node_at(doc: &DialogueDoc, key: NodeKey, pos: Vec2) -> EdNode {
-        let mut node = doc.node(key).expect("node exists").clone();
-        node.pos = pos;
-        node
-    }
+    use crate::graph::fixtures::{GUARD, close, doc_from, node_at};
 
     #[test]
     fn rows_and_height_next_node_vs_three_choices() {
-        let doc = guard_doc();
+        let doc = doc_from(GUARD);
         let friend = node_at(&doc, NodeKey(2), Vec2::ZERO); // Next(End)
         let greet = node_at(&doc, NodeKey(1), Vec2::ZERO); // 3 choices
         assert_eq!(rows(&friend), 1);
@@ -158,7 +142,7 @@ mod tests {
 
     #[test]
     fn pin_positions_for_next_node_and_three_choice_node() {
-        let doc = guard_doc();
+        let doc = doc_from(GUARD);
         let pos = Vec2::new(100.0, 50.0);
         let friend = node_at(&doc, NodeKey(2), pos); // Next node
         let greet = node_at(&doc, NodeKey(1), pos); // 3 choices
@@ -191,7 +175,7 @@ mod tests {
 
     #[test]
     fn hit_test_pin_beats_body_and_topmost_node_wins() {
-        let mut doc = guard_doc();
+        let mut doc = doc_from(GUARD);
         let a = NodeKey(2); // friend, Next node
         let b = NodeKey(3); // pass, Next node
         doc.set_node_pos(a, Vec2::new(0.0, 0.0));
@@ -271,7 +255,7 @@ mod tests {
 
     #[test]
     fn graph_bounds_is_union_of_node_rects() {
-        let mut doc = guard_doc();
+        let mut doc = doc_from(GUARD);
         doc.set_node_pos(NodeKey(1), Vec2::new(100.0, 200.0));
         doc.set_node_pos(NodeKey(2), Vec2::new(-50.0, 0.0));
         doc.set_node_pos(NodeKey(3), Vec2::new(300.0, 10.0));

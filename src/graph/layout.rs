@@ -183,10 +183,6 @@ mod tests {
     use crate::graph::fixtures::{GUARD, LOOPS, doc_from};
     use crate::graph::geometry::node_rect;
 
-    fn guard_doc() -> DialogueDoc {
-        doc_from(GUARD)
-    }
-
     fn loops_doc() -> DialogueDoc {
         doc_from(LOOPS)
     }
@@ -228,7 +224,7 @@ mod tests {
 
     #[test]
     fn guard_start_is_in_layer_zero_and_no_rects_overlap() {
-        let mut doc = guard_doc();
+        let mut doc = doc_from(GUARD);
         auto_layout(&mut doc);
         let start = doc.start.expect("guard.json has a start");
         let start_x = doc.node(start).expect("start exists").pos.x;
@@ -334,7 +330,7 @@ mod tests {
 
     #[test]
     fn auto_layout_leaves_dirty_false() {
-        let mut doc = guard_doc();
+        let mut doc = doc_from(GUARD);
         assert!(!doc.dirty, "a freshly converted doc is clean");
         auto_layout(&mut doc);
         assert!(!doc.dirty, "layout must not dirty the doc");

@@ -7,10 +7,10 @@
 // The `Component`/`Resource` derive macros expand to `bevy_ecs::...` paths; this crate does not
 // depend on `bevy_ecs` directly, so the facade's re-export brings the name into scope.
 use aberredengine::bevy_ecs;
-use aberredengine::prelude::{Component, Entity, Resource, Vec2};
+use aberredengine::prelude::{Component, Entity, Resource};
 use rustc_hash::FxHashMap;
 
-use crate::graph::projection_plan::Shown;
+use crate::graph::projection_plan::Snapshot;
 use crate::model::{NodeKey, Slot};
 
 /// Marker on a node's root entity (the entity carrying its `WorldPosition`). The node's key is
@@ -32,33 +32,22 @@ pub struct GraphPart;
 #[derive(Component, Debug, Clone, Copy)]
 pub struct GraphPreview;
 
-/// One spawned node: its root entity plus the position it was spawned at.
-#[derive(Debug, Clone)]
-pub struct NodeEntry {
-    pub root: Entity,
-    pub pos: Vec2,
-}
-
-/// One spawned edge: the bezier entity, its arrowhead child and the geometry it was drawn with.
-#[derive(Debug, Clone)]
+/// One spawned edge: the bezier entity and its arrowhead child.
+#[derive(Debug, Clone, Copy)]
 pub struct EdgeEntry {
     pub entity: Entity,
     pub arrow: Entity,
-    pub from: Vec2,
-    pub to: Vec2,
-    pub selected_source: bool,
-    pub target: NodeKey,
 }
 
 /// What the projection system currently has spawned — its memory between ticks, updated after
 /// each executed projection plan.
 #[derive(Resource, Debug, Default)]
 pub struct GraphEntities {
-    pub shown_doc: Option<u64>,
-    pub shown_revision: u64,
-    pub metrics_ready: bool,
-    /// What the last executed plan drew — the `prev` side of the next `plan_projection` diff.
-    pub shown: Shown,
-    pub nodes: FxHashMap<NodeKey, NodeEntry>,
+    /// The last executed plan's snapshot — the `prev` side of the next `plan_projection` diff;
+    /// its `(doc_id, revision, metrics_ready)` triple is the cheap-path key.
+    pub shown: Snapshot,
+    /// Node key -> the node's root entity (the one carrying its `WorldPosition`).
+    pub nodes: FxHashMap<NodeKey, Entity>,
+    /// Edge key `(from_key, slot)` -> the bezier entity and its arrowhead child.
     pub edges: FxHashMap<(NodeKey, Slot), EdgeEntry>,
 }

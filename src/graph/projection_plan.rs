@@ -1,14 +1,13 @@
 //! Pure projection planning: `snapshot_of` captures the active doc as plain data and
-//! `plan_projection` diffs a new snapshot against what the ECS side currently shows (`Shown`),
-//! producing the `ProjOp`s the projection system executes. No ECS types here — the only engine
-//! import is `Vec2`.
+//! `plan_projection` diffs a new snapshot against the remembered one, producing the `ProjOp`s
+//! the projection system executes. No ECS types here — the only engine import is `Vec2`.
 
 use aberredengine::prelude::Vec2;
 use rustc_hash::{FxHashMap, FxHashSet};
 
 use crate::graph::describe::{row_link, row_text};
 use crate::graph::geometry;
-use crate::model::{DialogueDoc, Link, NodeKey, Severity, Slot};
+use crate::model::{DialogueDoc, EdNode, Link, NodeKey, Severity, Slot};
 
 /// What an output row's target resolves to (for the signature).
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -60,32 +59,15 @@ pub struct EdgeView {
 }
 
 /// A point-in-time capture of one doc, in deterministic order (nodes in doc order, then edges).
-#[derive(Debug, Clone, PartialEq)]
+/// The ECS side remembers the last executed snapshot as the `prev` side of the next diff;
+/// `Default` (doc_id 0, revision 0, nothing, metrics not ready) means "nothing shown".
+#[derive(Debug, Clone, Default, PartialEq)]
 pub struct Snapshot {
     pub doc_id: u64,
+    pub revision: u64,
     pub metrics_ready: bool,
     pub nodes: Vec<NodeView>,
     pub edges: Vec<EdgeView>,
-}
-
-/// What the ECS side remembers having shown — a [`Snapshot`] without entities.
-/// `Default` (doc_id 0, nothing) means "nothing shown yet".
-#[derive(Debug, Clone, Default, PartialEq)]
-pub struct Shown {
-    pub doc_id: u64,
-    pub metrics_ready: bool,
-    pub nodes: Vec<NodeView>,
-    pub edges: Vec<EdgeView>,
-}
-
-impl Shown {
-    /// Records `snap` as the new shown state.
-    pub fn record(&mut self, snap: &Snapshot) {
-        self.doc_id = snap.doc_id;
-        self.metrics_ready = snap.metrics_ready;
-        self.nodes = snap.nodes.clone();
-        self.edges = snap.edges.clone();
-    }
 }
 
 /// One step of a projection plan.
@@ -167,11 +149,13 @@ pub fn snapshot_of(doc: &mut DialogueDoc, metrics_ready: bool) -> Snapshot {
         })
         .collect();
 
+    let node_by_key: FxHashMap<NodeKey, &EdNode> = doc.nodes.iter().map(|n| (n.key, n)).collect();
+
     let mut edges = Vec::new();
     for node in &doc.nodes {
         for i in 0..geometry::rows(node) {
             if let Link::Node(target) = row_link(node, i)
-                && let Some(target_node) = doc.node(*target)
+                && let Some(&target_node) = node_by_key.get(target)
             {
                 edges.push(EdgeView {
                     from_key: node.key,
@@ -187,19 +171,20 @@ pub fn snapshot_of(doc: &mut DialogueDoc, metrics_ready: bool) -> Snapshot {
 
     Snapshot {
         doc_id: doc.doc_id,
+        revision: doc.revision,
         metrics_ready,
         nodes,
         edges,
     }
 }
 
-/// Diffs `next` against what is currently `prev`-shown. Rules: a different `doc_id` (or a
+/// Diffs `next` against the remembered `prev` snapshot. Rules: a different `doc_id` (or a
 /// first non-empty snapshot after nothing was shown) rebuilds from scratch
 /// (`[DespawnAll, Spawn*...]`); a new node spawns; a changed signature respawns; only a changed
 /// position moves; a gone node despawns together with every edge touching it; a new edge
 /// spawns; changed `from`/`to`/`selected_source` rewrites the edge (never respawned for a move);
 /// a gone edge despawns. Identical snapshots produce no ops.
-pub fn plan_projection(prev: &Shown, next: &Snapshot) -> Vec<ProjOp> {
+pub fn plan_projection(prev: &Snapshot, next: &Snapshot) -> Vec<ProjOp> {
     let prev_nothing = prev.doc_id == 0 && prev.nodes.is_empty() && prev.edges.is_empty();
     let next_nothing = next.doc_id == 0 && next.nodes.is_empty() && next.edges.is_empty();
     if prev.doc_id != next.doc_id || (prev_nothing && !next_nothing) {
@@ -269,9 +254,11 @@ pub fn plan_projection(prev: &Shown, next: &Snapshot) -> Vec<ProjOp> {
     }
 
     // Gone edges despawn (edges of deleted nodes were already emitted above).
+    let next_edge_keys: FxHashSet<(NodeKey, Slot)> =
+        next.edges.iter().map(|e| (e.from_key, e.slot)).collect();
     for pe in &prev.edges {
         let k = (pe.from_key, pe.slot);
-        if !despawned_edges.contains(&k) && !next.edges.iter().any(|e| (e.from_key, e.slot) == k) {
+        if !despawned_edges.contains(&k) && !next_edge_keys.contains(&k) {
             ops.push(ProjOp::DespawnEdge(pe.from_key, pe.slot));
         }
     }
@@ -341,9 +328,7 @@ mod tests {
     fn moving_a_node_yields_only_move_and_rewrite_ops() {
         let mut ws = ws_with(GUARD);
         let doc = ws.active_doc_mut().unwrap();
-        let before = snap(doc);
-        let mut shown = Shown::default();
-        shown.record(&before);
+        let shown = snap(doc);
 
         let new_pos = Vec2::new(500.0, 300.0);
         doc.set_node_pos(NodeKey(3), new_pos); // pass -> friend
@@ -372,8 +357,7 @@ mod tests {
     fn renaming_a_node_respawns_just_that_node() {
         let mut ws = ws_with(GUARD);
         let doc = ws.active_doc_mut().unwrap();
-        let mut shown = Shown::default();
-        shown.record(&snap(doc));
+        let shown = snap(doc);
 
         doc.rename_node(NodeKey(2), "pal".to_owned());
         let ops = plan_projection(&shown, &snap(doc));
@@ -384,8 +368,7 @@ mod tests {
     fn deleting_a_node_despawns_it_and_its_edges() {
         let mut ws = ws_with(GUARD);
         let doc = ws.active_doc_mut().unwrap();
-        let mut shown = Shown::default();
-        shown.record(&snap(doc));
+        let shown = snap(doc);
 
         doc.delete_node(NodeKey(1)); // greet: edges (1,Choice0) -> 2 and (1,Choice1) -> 3
         let ops = plan_projection(&shown, &snap(doc));
@@ -403,8 +386,7 @@ mod tests {
     fn adding_a_node_and_a_link_spawns_node_and_edge_and_respawns_the_source() {
         let mut ws = ws_with(GUARD);
         let doc = ws.active_doc_mut().unwrap();
-        let mut shown = Shown::default();
-        shown.record(&snap(doc));
+        let shown = snap(doc);
 
         let c = doc.add_node(Vec2::new(700.0, 0.0));
         doc.set_link(NodeKey(2), Slot::Next, Link::Node(c)); // friend: End -> Node(c)
@@ -422,8 +404,7 @@ mod tests {
     #[test]
     fn switching_doc_id_rebuilds_everything() {
         let mut ws = ws_with(GUARD);
-        let mut shown = Shown::default();
-        shown.record(&snap(ws.active_doc_mut().unwrap()));
+        let shown = snap(ws.active_doc_mut().unwrap());
 
         ws.add_doc(doc_from(LOOPS)); // doc_id 2, four nodes a..d
         let next = snap(ws.active_doc_mut().unwrap());
@@ -452,8 +433,7 @@ mod tests {
     fn selecting_a_node_respawns_it_and_rewrites_only_its_outgoing_edges() {
         let mut ws = ws_with(GUARD);
         let doc = ws.active_doc_mut().unwrap();
-        let mut shown = Shown::default();
-        shown.record(&snap(doc));
+        let shown = snap(doc);
 
         doc.select(Some(NodeKey(1))); // greet
         let ops = plan_projection(&shown, &snap(doc));
@@ -472,19 +452,16 @@ mod tests {
     fn identical_snapshots_give_no_ops() {
         let mut ws = ws_with(GUARD);
         let doc = ws.active_doc_mut().unwrap();
-        let mut shown = Shown::default();
-        shown.record(&snap(doc));
+        let shown = snap(doc);
         let again = snap(doc);
         assert_eq!(plan_projection(&shown, &again), Vec::<ProjOp>::new());
         // Also when nothing is shown and the next snapshot is empty.
         let empty = Snapshot {
-            doc_id: 0,
             metrics_ready: true,
-            nodes: Vec::new(),
-            edges: Vec::new(),
+            ..Snapshot::default()
         };
         assert_eq!(
-            plan_projection(&Shown::default(), &empty),
+            plan_projection(&Snapshot::default(), &empty),
             Vec::<ProjOp>::new()
         );
     }
@@ -492,15 +469,12 @@ mod tests {
     #[test]
     fn closing_the_active_doc_despawns_everything() {
         let mut ws = ws_with(GUARD);
-        let mut shown = Shown::default();
-        shown.record(&snap(ws.active_doc_mut().unwrap()));
+        let shown = snap(ws.active_doc_mut().unwrap());
         assert!(!shown.nodes.is_empty());
 
         let empty = Snapshot {
-            doc_id: 0,
             metrics_ready: true,
-            nodes: Vec::new(),
-            edges: Vec::new(),
+            ..Snapshot::default()
         };
         assert_eq!(plan_projection(&shown, &empty), vec![ProjOp::DespawnAll]);
     }
@@ -535,8 +509,7 @@ mod tests {
     fn metrics_readiness_is_part_of_the_node_sig() {
         let mut ws = ws_with(GUARD);
         let doc = ws.active_doc_mut().unwrap();
-        let mut shown = Shown::default();
-        shown.record(&snapshot_of(doc, false));
+        let shown = snapshot_of(doc, false);
         let ops = plan_projection(&shown, &snapshot_of(doc, true));
         assert_eq!(
             ops,

@@ -83,10 +83,7 @@ pub fn frame_all(bounds: Option<(Vec2, Vec2)>, viewport: Vec2, margin_px: f32) -
 #[cfg(test)]
 mod tests {
     use super::*;
-
-    fn close(a: Vec2, b: Vec2) -> bool {
-        a.abs_diff_eq(b, 1e-4)
-    }
+    use crate::graph::fixtures::close;
 
     fn cam() -> CamState {
         CamState {
