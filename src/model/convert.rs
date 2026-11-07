@@ -49,7 +49,7 @@ pub fn from_def(def: &DialogueDef) -> DialogueDoc {
         }
     };
 
-    // Second pass: resolve links now that every id is mapped (forward references included).
+    // Second pass: resolve links with the completed id map (forward references included).
     for (i, node_def) in def.nodes.iter().enumerate() {
         let out = match &node_def.choices {
             Some(choices) if !choices.is_empty() => {

@@ -62,8 +62,10 @@ fn tmp_sibling(path: &Path) -> PathBuf {
 }
 
 /// Opens `path` in `ws`: if a doc with the same canonical path is already open, makes it active and
-/// returns [`OpenOutcome::Focused`]; otherwise reads and parses the file, pushes the new doc (which
-/// becomes active) with `path` set to the canonical path and `dirty = false`, and returns
+/// returns [`OpenOutcome::Focused`] — both the requested path and the stored doc paths are
+/// canonicalized before matching, so a differently spelled path to the same file focuses the open
+/// doc instead of opening a duplicate. Otherwise reads and parses the file, pushes the new doc
+/// (which becomes active) with `path` set to the canonical path and `dirty = false`, and returns
 /// [`OpenOutcome::Opened`] with the doc's load warnings.
 pub fn open_path(ws: &mut Workspace, path: &Path) -> Result<OpenOutcome, OpError> {
     let canonical = canonical_or(path);
@@ -286,6 +288,8 @@ mod tests {
             "open stores the canonical path"
         );
 
+        // Saves in these tests only ever target the TempDir; the fixtures under tests/fixtures
+        // are read-only inputs and are never saved over.
         let save_path = tmp.join("guard-saved.json");
         let doc = ws.active_doc_mut().unwrap();
         save_doc(doc, &save_path).expect("save succeeds");

@@ -40,10 +40,13 @@ pub enum ProblemKind {
 /// One lint finding.
 #[derive(Debug, Clone, PartialEq)]
 pub struct Problem {
+    /// How bad the problem is.
     pub severity: Severity,
+    /// What kind of problem was found.
     pub kind: ProblemKind,
     /// The node the problem belongs to; `None` for doc-level problems such as a missing start.
     pub node: Option<NodeKey>,
+    /// Human-readable description; mirrors the engine's own wording where the engine has one.
     pub message: String,
 }
 

@@ -17,7 +17,9 @@ pub enum NotificationKind {
 /// is the engine's own error text; other kinds carry the `Display` text of the failure.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Notification {
+    /// Which modal the GUI should show for this notification.
     pub kind: NotificationKind,
+    /// The message text (for [`NotificationKind::SaveRejected`], the engine's own error text).
     pub message: String,
 }
 

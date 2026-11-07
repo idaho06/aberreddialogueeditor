@@ -31,10 +31,15 @@ pub enum Link {
 /// One player choice at a choice node.
 #[derive(Debug, Clone, PartialEq)]
 pub struct EdChoice {
+    /// The choice label shown to the player.
     pub text: String,
+    /// Where taking the choice leads.
     pub target: Link,
+    /// Condition that must hold for the choice to be offered; `None` means always offered.
     pub when: Option<DialogueCondition>,
+    /// Effects applied when the choice is taken.
     pub effects: Vec<DialogueEffect>,
+    /// Labels attached to the choice.
     pub labels: Vec<String>,
 }
 
@@ -54,19 +59,28 @@ impl EdChoice {
 /// list of choices.
 #[derive(Debug, Clone, PartialEq)]
 pub enum Outputs {
+    /// A single unconditional `next` link.
     Next(Link),
+    /// The player choices offered at the node.
     Choices(Vec<EdChoice>),
 }
 
 /// One dialogue node of the graph.
 #[derive(Debug, Clone, PartialEq)]
 pub struct EdNode {
+    /// Stable key of this node within its doc.
     pub key: NodeKey,
+    /// Engine-side id; should be unique within the doc (the linter reports duplicates).
     pub id: String,
+    /// Optional speaker name.
     pub speaker: Option<String>,
+    /// The dialogue text shown at this node.
     pub text: String,
+    /// Labels attached to the node.
     pub labels: Vec<String>,
+    /// Effects run when the node is entered.
     pub on_enter: Vec<DialogueEffect>,
+    /// The node's outgoing edges.
     pub out: Outputs,
     /// Canvas position. Never saved; auto-layout assigns it on load.
     pub pos: Vec2,
@@ -75,14 +89,18 @@ pub struct EdNode {
 /// Which output slot of a node [`DialogueDoc::set_link`] addresses.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub enum Slot {
+    /// The node's unconditional `next` output.
     Next,
+    /// The target of the choice at this index.
     Choice(usize),
 }
 
 /// Camera of one doc's graph view.
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub struct CamState {
+    /// World position the camera looks at.
     pub target: Vec2,
+    /// Zoom factor (`1.0` is 100%).
     pub zoom: f32,
 }
 
@@ -114,18 +132,28 @@ pub struct DialogueDoc {
     /// starting at 1). `0` for a doc that was never added to a workspace; the graph projection
     /// treats `doc_id == 0` with no content as "nothing shown".
     pub doc_id: u64,
+    /// All nodes of the graph, in insertion order.
     pub nodes: Vec<EdNode>,
+    /// The start node, if the doc has one.
     pub start: Option<NodeKey>,
+    /// File this doc was loaded from or last saved to, stored canonical/absolute; `None` while the
+    /// doc has never been saved.
     pub path: Option<PathBuf>,
+    /// `true` when the doc has unsaved changes.
     pub dirty: bool,
+    /// Bumped by every mutator; keys the graph projection.
     pub revision: u64,
     /// Content-only revision: incremented only by content mutators (the private `bump`), never by
     /// `bump_view` (view-only changes) and never by [`DialogueDoc::set_camera`]. The lint cache is
     /// keyed on this — lint depends only on node content, never on pos/selection/camera.
     pub content_revision: u64,
+    /// The currently selected node, if any.
     pub selected: Option<NodeKey>,
+    /// The graph view's camera state.
     pub camera: CamState,
+    /// Non-fatal problems found while loading the file (dangling references, dropped fields, ...).
     pub load_warnings: Vec<String>,
+    /// Allocator state behind [`DialogueDoc::fresh_key`]: the last key handed out.
     pub next_key: u64,
     /// Cached [`lint`] result for `content_revision`: `None` until the first [`DialogueDoc::problems`]
     /// call, then `(content_revision, problems)`; recomputed only when `content_revision` differs
@@ -222,22 +250,27 @@ impl DialogueDoc {
         self.bump_view();
     }
 
+    /// Sets the node's dialogue text.
     pub fn set_text(&mut self, key: NodeKey, text: String) {
         self.edit_node(key, |node| node.text = text);
     }
 
+    /// Sets or clears (`None`) the node's speaker.
     pub fn set_speaker(&mut self, key: NodeKey, speaker: Option<String>) {
         self.edit_node(key, |node| node.speaker = speaker);
     }
 
+    /// Replaces the node's labels.
     pub fn set_labels(&mut self, key: NodeKey, labels: Vec<String>) {
         self.edit_node(key, |node| node.labels = labels);
     }
 
+    /// Replaces the effects run when the node is entered.
     pub fn set_on_enter(&mut self, key: NodeKey, on_enter: Vec<DialogueEffect>) {
         self.edit_node(key, |node| node.on_enter = on_enter);
     }
 
+    /// Replaces the node's whole output mode (a `next` link or a choice list).
     pub fn set_outputs(&mut self, key: NodeKey, out: Outputs) {
         self.edit_node(key, |node| node.out = out);
     }
@@ -316,18 +349,22 @@ impl DialogueDoc {
         self.bump();
     }
 
+    /// Sets the text of choice `index`.
     pub fn set_choice_text(&mut self, key: NodeKey, index: usize, text: String) {
         self.edit_choice(key, index, |choice| choice.text = text);
     }
 
+    /// Sets or clears (`None`) the condition of choice `index`.
     pub fn set_choice_when(&mut self, key: NodeKey, index: usize, when: Option<DialogueCondition>) {
         self.edit_choice(key, index, |choice| choice.when = when);
     }
 
+    /// Replaces the effects of choice `index`.
     pub fn set_choice_effects(&mut self, key: NodeKey, index: usize, effects: Vec<DialogueEffect>) {
         self.edit_choice(key, index, |choice| choice.effects = effects);
     }
 
+    /// Replaces the labels of choice `index`.
     pub fn set_choice_labels(&mut self, key: NodeKey, index: usize, labels: Vec<String>) {
         self.edit_choice(key, index, |choice| choice.labels = labels);
     }
@@ -345,9 +382,9 @@ impl DialogueDoc {
         self.bump_view();
     }
 
-    /// Sets the graph-view camera. View-only like [`DialogueDoc::set_node_pos`]/[`select`], but bumps
-    /// NOTHING — not even `revision` or `content_revision`: the camera is view state, so the lint
-    /// cache stays valid and no projection is triggered.
+    /// Sets the graph-view camera. View-only like [`DialogueDoc::set_node_pos`] and
+    /// [`DialogueDoc::select`], but bumps NOTHING — not even `revision` or `content_revision`: the
+    /// camera is view state, so the lint cache stays valid and no projection is triggered.
     pub fn set_camera(&mut self, camera: CamState) {
         self.camera = camera;
     }
@@ -453,7 +490,9 @@ fn clear_link(link: &mut Link, deleted: NodeKey) {
 /// needs graph types: `world` is the canvas position of the press, `node` the hit node (if any).
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub struct ContextMenuRequest {
+    /// Canvas position of the press.
     pub world: Vec2,
+    /// The hit node, if the press was on one.
     pub node: Option<NodeKey>,
 }
 
@@ -461,7 +500,9 @@ pub struct ContextMenuRequest {
 /// logic-thread systems through [`crate::state::WorkspaceMutex`].
 #[derive(Debug, Clone, PartialEq, Default)]
 pub struct Workspace {
+    /// All open docs, in tab order.
     pub docs: Vec<DialogueDoc>,
+    /// Index into `docs` of the active tab.
     pub active: usize,
     /// Allocator for [`DialogueDoc::doc_id`]: the next id `add_doc` assigns (ids start at 1).
     pub next_doc_id: u64,
@@ -488,10 +529,12 @@ pub struct Workspace {
 }
 
 impl Workspace {
+    /// The currently active doc, if any.
     pub fn active_doc(&self) -> Option<&DialogueDoc> {
         self.docs.get(self.active)
     }
 
+    /// Mutable access to the currently active doc, if any.
     pub fn active_doc_mut(&mut self) -> Option<&mut DialogueDoc> {
         self.docs.get_mut(self.active)
     }
