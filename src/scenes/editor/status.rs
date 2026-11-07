@@ -12,9 +12,10 @@ use aberredengine::prelude::imgui::{Condition, WindowFlags};
 use aberredengine::prelude::*;
 
 use super::problems::{header_color, problem_counts};
-use crate::state::WorkspaceMutex;
+use crate::state::with_workspace;
 
 /// Snapshot of the status bar, taken under a short workspace lock.
+#[derive(Default)]
 struct StatusSnap {
     doc: Option<DocSnap>,
 }
@@ -29,24 +30,23 @@ struct DocSnap {
 }
 
 fn snapshot(app_state: &AppState) -> StatusSnap {
-    let Some(handle) = app_state.get::<WorkspaceMutex>() else {
-        return StatusSnap { doc: None };
-    };
-    let mut ws = handle.lock().unwrap();
-    let Some(doc) = ws.active_doc_mut() else {
-        return StatusSnap { doc: None };
-    };
-    let (errors, warnings) = problem_counts(doc.problems());
-    StatusSnap {
-        doc: Some(DocSnap {
-            path: doc.path.clone(),
-            dirty: doc.dirty,
-            errors,
-            warnings,
-            nodes: doc.nodes.len(),
-            zoom: doc.camera.zoom,
-        }),
-    }
+    with_workspace(app_state, |ws| {
+        let Some(doc) = ws.active_doc_mut() else {
+            return StatusSnap::default();
+        };
+        let (errors, warnings) = problem_counts(doc.problems());
+        StatusSnap {
+            doc: Some(DocSnap {
+                path: doc.path.clone(),
+                dirty: doc.dirty,
+                errors,
+                warnings,
+                nodes: doc.nodes.len(),
+                zoom: doc.camera.zoom,
+            }),
+        }
+    })
+    .unwrap_or_default()
 }
 
 /// `n` with the right plural: "1 node", "2 nodes".
@@ -123,6 +123,7 @@ pub fn draw(ctx: &mut GuiCtx) {
 mod tests {
     use super::*;
     use crate::model::{DialogueDoc, Workspace};
+    use crate::scenes::editor::testkit::{app_state_with, ws_with_two_linked_nodes};
     use aberredengine::prelude::Vec2;
 
     #[test]
@@ -165,32 +166,23 @@ mod tests {
         let snap = snapshot(&app_state);
         assert!(snap.doc.is_none(), "no WorkspaceMutex handle");
 
-        let handle: WorkspaceMutex =
-            std::sync::Arc::new(std::sync::Mutex::new(Workspace::default()));
-        let mut app_state = AppState::default();
-        app_state.insert(handle);
+        let app_state = app_state_with(Workspace::default());
         let snap = snapshot(&app_state);
         assert!(snap.doc.is_none(), "no active doc");
     }
 
     #[test]
     fn snapshot_captures_path_dirty_counts_nodes_and_zoom() {
-        let mut app_state = AppState::default();
-        let handle: WorkspaceMutex = std::sync::Arc::new(std::sync::Mutex::new({
-            let mut ws = Workspace::default();
-            crate::ops::new_doc(&mut ws);
+        let app_state = app_state_with({
+            let (mut ws, _a, _b) = ws_with_two_linked_nodes();
             let doc = ws.active_doc_mut().unwrap();
-            let a = doc.add_node(Vec2::ZERO);
-            let b = doc.add_node(Vec2::new(10.0, 0.0));
-            doc.set_link(a, crate::model::Slot::Next, crate::model::Link::Node(b));
             doc.set_camera(crate::model::CamState {
                 target: Vec2::new(1.0, 2.0),
                 zoom: 1.5,
             });
             doc.path = Some(std::path::PathBuf::from("/tmp/x/guard.json"));
             ws
-        }));
-        app_state.insert(handle);
+        });
         let snap = snapshot(&app_state);
         let doc = snap.doc.expect("a doc is open");
         assert_eq!(
@@ -224,9 +216,7 @@ mod tests {
         doc.add_node(Vec2::ZERO);
         doc.mark_clean();
         ws.add_doc(doc);
-        let handle: WorkspaceMutex = std::sync::Arc::new(std::sync::Mutex::new(ws));
-        let mut app_state = AppState::default();
-        app_state.insert(handle);
+        let app_state = app_state_with(ws);
         let snap = snapshot(&app_state);
         let doc = snap.doc.expect("a doc is open");
         assert_eq!(file_text(doc.path.as_deref(), doc.dirty), "Untitled");

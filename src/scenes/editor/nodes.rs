@@ -8,7 +8,7 @@ use aberredengine::prelude::imgui::{Condition, TreeNodeFlags};
 use aberredengine::prelude::*;
 
 use crate::model::NodeKey;
-use crate::state::WorkspaceMutex;
+use crate::state::with_workspace;
 
 /// Snapshot of the Nodes panel.
 struct NodesSnap {
@@ -19,18 +19,19 @@ struct NodesSnap {
 }
 
 fn snapshot(app_state: &AppState) -> Option<NodesSnap> {
-    let handle = app_state.get::<WorkspaceMutex>()?;
-    let ws = handle.lock().unwrap();
-    let doc = ws.active_doc()?;
-    Some(NodesSnap {
-        load_warnings: doc.load_warnings.clone(),
-        nodes: doc
-            .nodes
-            .iter()
-            .map(|node| (node.key, node.id.clone()))
-            .collect(),
-        selected: doc.selected,
+    with_workspace(app_state, |ws| {
+        let doc = ws.active_doc()?;
+        Some(NodesSnap {
+            load_warnings: doc.load_warnings.clone(),
+            nodes: doc
+                .nodes
+                .iter()
+                .map(|node| (node.key, node.id.clone()))
+                .collect(),
+            selected: doc.selected,
+        })
     })
+    .flatten()
 }
 
 /// Draws the Nodes window for the active doc.
@@ -67,12 +68,11 @@ pub fn draw(ctx: &mut GuiCtx) {
             }
         });
 
-    if let Some(key) = clicked
-        && let Some(handle) = ctx.app_state.get::<WorkspaceMutex>().cloned()
-    {
-        let mut ws = handle.lock().unwrap();
-        if let Some(doc) = ws.active_doc_mut() {
-            doc.select(Some(key));
-        }
+    if let Some(key) = clicked {
+        with_workspace(ctx.app_state, |ws| {
+            if let Some(doc) = ws.active_doc_mut() {
+                doc.select(Some(key));
+            }
+        });
     }
 }

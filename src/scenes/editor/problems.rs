@@ -15,7 +15,7 @@ use aberredengine::prelude::*;
 
 use super::actions::EditorAction;
 use crate::model::{NodeKey, Problem, Severity};
-use crate::state::WorkspaceMutex;
+use crate::state::with_workspace;
 
 /// Red for errors / a non-clean header.
 const RED: [f32; 4] = [1.0, 0.35, 0.35, 1.0];
@@ -36,36 +36,41 @@ struct ProblemsSnap {
     load_warnings: Vec<String>,
 }
 
-fn snapshot(app_state: &AppState) -> ProblemsSnap {
-    let Some(handle) = app_state.get::<WorkspaceMutex>() else {
-        return ProblemsSnap {
+impl Default for ProblemsSnap {
+    /// No workspace handle at all: the window is visible (the derived `Workspace` default) and
+    /// there is nothing to show.
+    fn default() -> Self {
+        ProblemsSnap {
             visible: true,
             problems: None,
             node_exists: Vec::new(),
             load_warnings: Vec::new(),
-        };
-    };
-    let mut ws = handle.lock().unwrap();
-    let visible = !ws.problems_hidden;
-    let Some(doc) = ws.active_doc_mut() else {
-        return ProblemsSnap {
-            visible,
-            problems: None,
-            node_exists: Vec::new(),
-            load_warnings: Vec::new(),
-        };
-    };
-    let problems = doc.problems().to_vec();
-    let node_exists = problems
-        .iter()
-        .map(|p| p.node.is_some_and(|key| doc.node(key).is_some()))
-        .collect();
-    ProblemsSnap {
-        visible,
-        problems: Some(problems),
-        node_exists,
-        load_warnings: doc.load_warnings.clone(),
+        }
     }
+}
+
+fn snapshot(app_state: &AppState) -> ProblemsSnap {
+    with_workspace(app_state, |ws| {
+        let visible = !ws.problems_hidden;
+        let Some(doc) = ws.active_doc_mut() else {
+            return ProblemsSnap {
+                visible,
+                ..ProblemsSnap::default()
+            };
+        };
+        let problems = doc.problems().to_vec();
+        let node_exists = problems
+            .iter()
+            .map(|p| p.node.is_some_and(|key| doc.node(key).is_some()))
+            .collect();
+        ProblemsSnap {
+            visible,
+            problems: Some(problems),
+            node_exists,
+            load_warnings: doc.load_warnings.clone(),
+        }
+    })
+    .unwrap_or_default()
 }
 
 /// `(errors, warnings)` counts of `problems`.
@@ -234,6 +239,8 @@ pub fn draw(ctx: &mut GuiCtx, actions: &mut Vec<EditorAction>) {
 mod tests {
     use super::*;
     use crate::model::{DialogueDoc, ProblemKind, Workspace, from_def, lint};
+    use crate::scenes::editor::testkit::app_state_with;
+    use crate::state::WorkspaceMutex;
     use aberredengine::prelude::{DialogueDef, Vec2};
 
     fn prob(severity: Severity, kind: ProblemKind, node: Option<NodeKey>, msg: &str) -> Problem {
@@ -434,8 +441,7 @@ mod tests {
 
     #[test]
     fn snapshot_captures_problems_node_existence_warnings_and_visibility() {
-        let mut app_state = AppState::default();
-        let handle: WorkspaceMutex = std::sync::Arc::new(std::sync::Mutex::new({
+        let app_state = app_state_with({
             let mut ws = Workspace::default();
             crate::ops::new_doc(&mut ws);
             let doc = ws.active_doc_mut().unwrap();
@@ -443,8 +449,7 @@ mod tests {
             doc.start = Some(NodeKey(999)); // stale start key: StartMissing with node_exists=false
             doc.load_warnings.push("warned".to_owned());
             ws
-        }));
-        app_state.insert(handle);
+        });
         let snap = snapshot(&app_state);
         assert!(snap.visible);
         let problems = snap.problems.expect("a doc is open");

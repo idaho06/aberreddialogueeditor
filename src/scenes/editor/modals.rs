@@ -13,7 +13,7 @@ use aberredengine::prelude::*;
 
 use crate::model::{Notification, NotificationKind, Workspace};
 use crate::ops;
-use crate::state::WorkspaceMutex;
+use crate::state::with_workspace;
 use crate::systems::file_dialogs::{AsyncFileDialogRequest, request_async_dialog};
 
 const ERROR_MODAL: &str = "Error##modal";
@@ -83,21 +83,16 @@ struct ModalSnap {
 }
 
 fn snapshot(app_state: &AppState) -> ModalSnap {
-    app_state
-        .get::<WorkspaceMutex>()
-        .map(|handle| {
-            let ws = handle.lock().unwrap();
-            ModalSnap {
-                error: ws.notifications.first().cloned(),
-                pending_close: ws
-                    .pending_close
-                    .filter(|index| *index < ws.docs.len())
-                    .map(|index| (index, ops::doc_title(&ws.docs[index]))),
-                pending_quit: ws.pending_quit,
-                show_controls: ws.show_controls,
-            }
-        })
-        .unwrap_or_default()
+    with_workspace(app_state, |ws| ModalSnap {
+        error: ws.notifications.first().cloned(),
+        pending_close: ws
+            .pending_close
+            .filter(|index| *index < ws.docs.len())
+            .map(|index| (index, ops::doc_title(&ws.docs[index]))),
+        pending_quit: ws.pending_quit,
+        show_controls: ws.show_controls,
+    })
+    .unwrap_or_default()
 }
 
 /// Opens `id` as a modal popup and runs `body` while it is open (no-op when it cannot open).
@@ -257,13 +252,12 @@ fn apply_choice(app_state: &AppState, choice: Option<ModalChoice>) -> bool {
     let Some(choice) = choice else {
         return false;
     };
-    let Some(handle) = app_state.get::<WorkspaceMutex>().cloned() else {
+    // Short lock; the Save As dialog request happens after it is dropped.
+    let Some(effect) = with_workspace(app_state, |ws| {
+        log::debug!("modal choice {choice:?} applied");
+        apply_choice_ws(ws, choice)
+    }) else {
         return false;
-    };
-    log::debug!("modal choice {choice:?} applied");
-    let effect = {
-        let mut ws = handle.lock().unwrap();
-        apply_choice_ws(&mut ws, choice)
     };
     match effect {
         ChoiceEffect::Nothing => false,

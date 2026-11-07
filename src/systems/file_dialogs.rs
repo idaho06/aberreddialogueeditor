@@ -18,7 +18,7 @@ use rfd::AsyncFileDialog;
 
 use crate::model::{Notification, NotificationKind, Workspace};
 use crate::ops;
-use crate::state::WorkspaceMutex;
+use crate::state::with_workspace;
 
 /// A file-dialog request from the GUI. Only one dialog can be in flight at a time.
 #[derive(Debug)]
@@ -184,21 +184,10 @@ pub fn poll_async_dialogs(app_state: Res<AppState>) {
     let Some(result) = result else {
         return;
     };
-    let Some(ws_handle) = app_state.get::<WorkspaceMutex>().cloned() else {
+    // One short workspace lock for the apply; warns when the handle is missing.
+    if with_workspace(&app_state, |ws| apply_result(ws, result)).is_none() {
         log::warn!("a file dialog finished but WorkspaceMutex is missing from AppState");
-        return;
-    };
-    let mut ws = ws_handle.lock().unwrap();
-    apply_result(&mut ws, result);
-}
-
-/// Drops the in-flight dialog's receiver (the worker's send then fails and is only logged).
-#[allow(dead_code)] // reserved for scene-exit cleanup in a later plan step
-pub fn clear_async_dialog(app_state: &AppState) {
-    let Some(handle) = app_state.get::<AsyncFileDialogMutex>() else {
-        return;
-    };
-    handle.lock().unwrap().receiver = None;
+    }
 }
 
 #[cfg(test)]

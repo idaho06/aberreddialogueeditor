@@ -60,7 +60,8 @@ DialogueTree, DialogueError, Vec2}`.
   (`graph_frame_system` reads `UiCapture::mouse`).
 - Lock discipline: lock `WorkspaceMutex` only for short snapshots and per action — never across imgui widget
   calls, `request_async_dialog`/`dialog_in_flight`, or any rfd code. Panels snapshot under a short lock, draw
-  with the guard dropped, then re-lock to apply.
+  with the guard dropped, then re-lock to apply. The short-lock sites go through `state::with_workspace`
+  (`src/state.rs`), whose guard lives only for the closure, so the lock cannot be held across a widget call.
 
 ## Graph pipeline (`src/graph`)
 
@@ -139,7 +140,8 @@ dialog requests come back in `ActionEffects::dialog` and are dispatched after th
   which would leak node text into the log. `apply_edits` logs only the edit kind and the node key, and edits
   are applied only if the active doc's `doc_id` still matches the snapshot's.
 - Windows: `nodes.rs` (Nodes list + load warnings), `inspector/` (Inspector: `mod.rs` window+Edit+apply_edits,
-  `node_fields.rs`, `outputs.rs`, `expr.rs` recursive condition editor, `effects.rs` effects list editor),
+  `node_fields.rs`, `outputs.rs`, `expr.rs` recursive condition editor, `effects.rs` effects list editor,
+  `widgets.rs` shared key/type-combo/Up-Down-Delete widgets),
   `problems.rs` (Problems window, errors first; row click -> `FocusNode`), `status.rs` (bottom status bar),
   `tabs.rs` (tab strip, `###doc{doc_id}` ids), `context_menu.rs` (the `graph_ctx` popup drained from
   `pending_context_menu`), `modals.rs` (notification modal with kind-based title, unsaved-changes close/quit
@@ -167,11 +169,11 @@ applies it through the pure `apply_result`, pushing failures into `Workspace.not
 | File | What it is |
 |---|---|
 | `src/main.rs` | Entry: `env_logger` (default `info`), `EngineBuilder` wiring — `on_setup(load_state)`, `add_system(poll_async_dialogs)`, `add_system(graph_frame_system)`, `add_late_system(graph_projection_system)`, `add_late_system(graph_preview_system)`, `window_resize` observer, scene `"editor"` + enter + gui, `try_run()` |
-| `src/state.rs` | `UiCapture` (mouse/keyboard `AtomicBool`s) and the handle aliases `UiCaptureHandle`, `WorkspaceMutex` |
+| `src/state.rs` | `UiCapture` (mouse/keyboard `AtomicBool`s), the handle aliases `UiCaptureHandle`, `WorkspaceMutex`, and `with_workspace` (the short-lock helper: runs a closure with the workspace locked, guard dropped on return) |
 | `src/model/mod.rs` | Model module root + re-exports (`from_def`/`to_def`, doc types, lint, notifications) |
 | `src/model/doc.rs` | `Workspace`, `DialogueDoc` + all named mutators, `revision`/`content_revision`/`dirty` rules, lint cache, `NodeKey`, `Link`, `EdChoice`, `Outputs`, `EdNode`, `Slot`, `CamState`, `ContextMenuRequest` |
 | `src/model/convert.rs` | `from_def` (tolerant) / `to_def` (total, exact) against the engine's `DialogueDef` — load/save only |
-| `src/model/lint.rs` | `Severity`/`ProblemKind`/`Problem`, `lint` (all problems, deterministic order), `has_errors`, `engine_gate` (`DialogueTree::try_from(to_def(doc))`) |
+| `src/model/lint.rs` | `Severity`/`ProblemKind`/`Problem`, `lint` (all problems, deterministic order), `engine_gate` (`DialogueTree::try_from(to_def(doc))`) |
 | `src/model/notify.rs` | `Notification`/`NotificationKind` (`Error`, `SaveRejected`) queue entries for the GUI modal |
 | `src/ops/mod.rs` | `open_path`/`save_doc`/`save_doc_at`/`new_doc`/`close_doc`/`doc_title`, `OpenOutcome`, `OpError`, `error_notification` |
 | `src/graph/mod.rs` | Graph module wiring, re-exports, `#[cfg(test)] fixtures` helper (fixture JSON + laid-out guard doc) |
@@ -191,7 +193,7 @@ applies it through the pure `apply_result`, pushing failures into `Workspace.not
 | `src/graph/frame.rs` | `frame_doc` (`set_camera(frame_all(graph_bounds(doc), viewport, 40.0))`) |
 | `src/graph/preview.rs` | `graph_preview_system` — the single `GraphPreview` drag-link entity |
 | `src/scenes/mod.rs` | `pub mod editor` |
-| `src/scenes/editor/mod.rs` | Editor module wiring, `gui`/`enter` re-exports, `display_viewport`, `#[cfg(test)] testkit` (fixture paths, `TempDir`) |
+| `src/scenes/editor/mod.rs` | Editor module wiring, `gui`/`enter` re-exports, `display_viewport`, `#[cfg(test)] testkit` (`fixture`, `app_state_with`, `ws_with_two_linked_nodes`, `TempDir`) |
 | `src/scenes/editor/lifecycle.rs` | Scene enter: insert `MainCamera`, `GraphEntities`, `GraphInput`; disable camera follow; rebind `Action2` to right mouse only |
 | `src/scenes/editor/gui.rs` | The scene GUI callback: capture flags, panel draw order, `EditorAction` queue application |
 | `src/scenes/editor/menu.rs` | Main menu bar (File/Edit/View/Help) producing `EditorAction`s |
@@ -203,6 +205,7 @@ applies it through the pure `apply_result`, pushing failures into `Workspace.not
 | `src/scenes/editor/inspector/outputs.rs` | Outputs editor: Next/Choices radios, per-choice sections (`###choice{i}`), `combo_entries`, `target_combo`, `truncate_chars` |
 | `src/scenes/editor/inspector/expr.rs` | Recursive condition editor (`condition_editor`, `optional_condition_editor`), `CondKind`, pure `convert_condition` |
 | `src/scenes/editor/inspector/effects.rs` | Effects list editor (`effects_editor`), `EffectKind`, pure `convert_effect`, `move_item` |
+| `src/scenes/editor/inspector/widgets.rs` | Widgets shared by the condition/effect/choice editors: `key_editor` (with the faint-red "(empty key)" hint), `type_combo`, `reorder_delete_row`/`RowAction` |
 | `src/scenes/editor/problems.rs` | Problems window: `problem_counts`/`grouped_rows`/`row_target`/`header_*`, `should_draw` (a hidden window is not drawn at all) |
 | `src/scenes/editor/status.rs` | Bottom status bar + pure `file_text`/`problems_text`/`nodes_text`/`zoom_text` |
 | `src/scenes/editor/context_menu.rs` | `graph_ctx` popup: drains `pending_context_menu`, `items_for`, `PENDING` thread-local |
@@ -234,8 +237,9 @@ applies it through the pure `apply_result`, pushing failures into `Workspace.not
   error). The Problems window needs no change (rows are generic over `Severity`/`Problem`), but the row is
   clickable only when `problem.node` still exists.
 - **A new window/panel:** follow the standard pattern — a `snapshot(app_state)` that locks `WorkspaceMutex`
-  briefly and clones what the panel needs, `draw` that runs with the guard dropped and collects intents
-  (`EditorAction`s or `Edit`s), then a fresh short lock to apply; register the draw call in `gui.rs`. A window
+  briefly (via `state::with_workspace`) and clones what the panel needs, `draw` that runs with the guard
+  dropped and collects intents (`EditorAction`s or `Edit`s), then a fresh short lock to apply; register the
+  draw call in `gui.rs`. A window
   that can be hidden must not be drawn at all when hidden (imgui's `p_open` does not hide it — see
   `problems.rs::should_draw`). Widget ids: `push_id_usize(index)` per row + fixed `###suffix` labels, never
   content text.

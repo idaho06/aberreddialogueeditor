@@ -18,7 +18,7 @@ use aberredengine::prelude::*;
 
 use super::actions::{EditorAction, tab_label};
 use crate::ops;
-use crate::state::WorkspaceMutex;
+use crate::state::with_workspace;
 
 thread_local! {
     /// The `ws.active` value seen on the previous frame; `None` before the first frame.
@@ -27,14 +27,14 @@ thread_local! {
 
 /// Snapshot of the tab strip: one label per doc plus the active index. Locks the workspace briefly.
 fn snapshot(app_state: &AppState) -> Option<(Vec<String>, usize)> {
-    let handle = app_state.get::<WorkspaceMutex>()?;
-    let ws = handle.lock().unwrap();
-    let labels = ws
-        .docs
-        .iter()
-        .map(|doc| tab_label(&ops::doc_title(doc), doc.dirty, doc.doc_id))
-        .collect();
-    Some((labels, ws.active))
+    with_workspace(app_state, |ws| {
+        let labels = ws
+            .docs
+            .iter()
+            .map(|doc| tab_label(&ops::doc_title(doc), doc.dirty, doc.doc_id))
+            .collect();
+        (labels, ws.active)
+    })
 }
 
 /// Which tab a click should focus. On the `SET_SELECTED` frame imgui still reports the previously
@@ -125,13 +125,12 @@ pub fn draw(ctx: &mut GuiCtx, actions: &mut Vec<EditorAction>) {
     }
 
     // Clicking a tab makes it active (brief re-lock; the widgets above are already drawn).
-    if let Some(index) = focus
-        && let Some(handle) = ctx.app_state.get::<WorkspaceMutex>().cloned()
-    {
-        let mut ws = handle.lock().unwrap();
-        if index < ws.docs.len() {
-            ws.active = index;
-        }
+    if let Some(index) = focus {
+        with_workspace(ctx.app_state, |ws| {
+            if index < ws.docs.len() {
+                ws.active = index;
+            }
+        });
     }
 }
 

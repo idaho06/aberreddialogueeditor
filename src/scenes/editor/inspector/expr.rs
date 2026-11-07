@@ -11,8 +11,7 @@
 use aberredengine::prelude::imgui::Ui;
 use aberredengine::prelude::{DialogueCmp, DialogueCondition};
 
-/// Faint red for the "(empty key)" hint (dimmer than the lint-error red).
-const FAINT_RED: [f32; 4] = [1.0, 0.45, 0.45, 0.55];
+use super::widgets::{key_editor, type_combo};
 
 /// The comparison operators of an integer condition, in combo order, with their display symbol.
 const CMP_SYMBOLS: [(DialogueCmp, &str); 6] = [
@@ -129,15 +128,6 @@ pub fn convert_condition(old: &DialogueCondition, to: CondKind) -> DialogueCondi
     }
 }
 
-/// The key input shared by the leaf kinds, plus the faint-red "(empty key)" hint when empty.
-fn key_editor(ui: &Ui, key: &mut String) -> bool {
-    let changed = ui.input_text("Key", key).build();
-    if key.is_empty() {
-        ui.text_colored(FAINT_RED, "(empty key)");
-    }
-    changed
-}
-
 /// The operator combo of an integer condition, showing "==", "!=", "<", "<=", ">", ">=".
 fn cmp_combo(ui: &Ui, op: &mut DialogueCmp) -> bool {
     let preview = CMP_SYMBOLS
@@ -196,21 +186,15 @@ pub fn condition_editor(ui: &Ui, cond: &mut DialogueCondition) -> bool {
     let current = CondKind::of(cond);
 
     // Type combo: picking another kind converts the whole condition.
-    if let Some(combo) = ui.begin_combo("Type##cond_type", current.name()) {
-        for (i, kind) in CondKind::KINDS.iter().enumerate() {
-            let _entry = ui.push_id_usize(i);
-            if ui
-                .selectable_config(kind.name())
-                .selected(*kind == current)
-                .build()
-                && *kind != current
-            {
-                *cond = convert_condition(cond, *kind);
-                changed = true;
-            }
-        }
-        combo.end();
-    }
+    changed |= type_combo(
+        ui,
+        "Type##cond_type",
+        current.name(),
+        current,
+        &CondKind::KINDS,
+        |kind| kind.name(),
+        |kind| *cond = convert_condition(cond, kind),
+    );
 
     match cond {
         DialogueCondition::Flag { key } => {

@@ -3,7 +3,6 @@
 //!
 //! Engine imports are limited to `aberredengine::prelude::{DialogueDef, NodeDef, ChoiceDef,
 //! DialogueCondition, DialogueCmp, DialogueEffect, DialogueTree, DialogueError, Vec2}`.
-#![allow(dead_code, unused_imports)] // consumed by later plan steps
 
 mod convert;
 mod doc;
@@ -15,5 +14,7 @@ pub use doc::{
     CamState, ContextMenuRequest, DialogueDoc, EdChoice, EdNode, Link, NodeKey, Outputs, Slot,
     Workspace,
 };
-pub use lint::{Problem, ProblemKind, Severity, engine_gate, has_errors, lint};
+#[cfg(test)] // the lint function itself is only re-exported for the problems-panel tests
+pub use lint::lint;
+pub use lint::{Problem, ProblemKind, Severity, engine_gate};
 pub use notify::{Notification, NotificationKind};

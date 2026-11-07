@@ -14,6 +14,7 @@ use std::collections::HashMap;
 use aberredengine::prelude::imgui::{StyleColor, TreeNodeFlags, Ui};
 
 use super::node_fields::labels_editor;
+use super::widgets::{RowAction, reorder_delete_row};
 use super::{Edit, OutputsMode, effects, expr};
 use crate::model::{EdNode, Link, NodeKey, Outputs, Slot};
 
@@ -72,22 +73,12 @@ pub fn draw(ui: &Ui, node: &EdNode, targets: &[(NodeKey, String)]) -> Vec<Edit> 
                         edits.push(Edit::SetChoiceLabels(key, i, labels));
                     }
                     // Up / Down / Delete on one row; Up disabled on the first, Down on the last.
-                    if i == 0 {
-                        let _disabled = ui.begin_disabled(true);
-                        ui.small_button("Up");
-                    } else if ui.small_button("Up") {
-                        edits.push(Edit::MoveChoice(key, i, -1));
-                    }
-                    ui.same_line();
-                    if i == last {
-                        let _disabled = ui.begin_disabled(true);
-                        ui.small_button("Down");
-                    } else if ui.small_button("Down") {
-                        edits.push(Edit::MoveChoice(key, i, 1));
-                    }
-                    ui.same_line();
-                    if ui.small_button("Delete") {
-                        edits.push(Edit::DeleteChoice(key, i));
+                    match reorder_delete_row(ui, i, last) {
+                        Some(RowAction::Move(delta)) => {
+                            edits.push(Edit::MoveChoice(key, i, delta));
+                        }
+                        Some(RowAction::Delete) => edits.push(Edit::DeleteChoice(key, i)),
+                        None => {}
                     }
                     // When: the optional-condition editor (a "When" checkbox + nested editor)
                     // on a LOCAL clone; a change emits the whole new Option<DialogueCondition>.

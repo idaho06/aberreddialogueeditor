@@ -11,7 +11,7 @@
 use aberredengine::prelude::*;
 
 use crate::graph::{auto_layout, center_on, frame_doc, node_rect, screen_to_world};
-use crate::model::{NodeKey, Workspace};
+use crate::model::{DialogueDoc, NodeKey, Workspace};
 use crate::ops;
 use crate::systems::file_dialogs::{
     AsyncFileDialogRequest, dialog_in_flight, request_async_dialog,
@@ -114,13 +114,70 @@ pub enum QuitDecision {
     Confirm,
 }
 
-/// Any dirty doc means quit needs confirmation.
+/// Any dirty doc means quit needs confirmation: the same decision as closing a dirty tab.
 pub fn quit_decision(ws: &Workspace) -> QuitDecision {
-    if ws.docs.iter().any(|doc| doc.dirty) {
-        QuitDecision::Confirm
-    } else {
-        QuitDecision::QuitNow
+    match close_decision(ws.docs.iter().any(|doc| doc.dirty)) {
+        CloseDecision::CloseNow => QuitDecision::QuitNow,
+        CloseDecision::Confirm => QuitDecision::Confirm,
     }
+}
+
+/// Applies `f` to the active doc; a no-op when no doc is open.
+fn with_active_doc(ws: &mut Workspace, f: impl FnOnce(&mut DialogueDoc)) {
+    if let Some(doc) = ws.active_doc_mut() {
+        f(doc);
+    }
+}
+
+/// The Save arm: save to the doc's path when it has one (a gate rejection pushes a
+/// notification), otherwise fall back to Save As (untitled or no active doc).
+fn save_active(ws: &mut Workspace, fx: &mut ActionEffects, app_state: Option<&AppState>) {
+    let path = ws.active_doc().and_then(|doc| doc.path.clone());
+    match path {
+        Some(path) => {
+            let result = ws.active_doc_mut().map(|doc| ops::save_doc(doc, &path));
+            if let Some(Err(err)) = result {
+                ws.notifications.push(ops::error_notification(&err));
+            }
+        }
+        None => {
+            log::debug!(
+                "action {:?}: active doc has no path, falling back to Save As",
+                EditorAction::Save
+            );
+            request_save_as(fx, app_state, ws);
+        }
+    }
+}
+
+/// The CloseTab arm. Returns `Some(())` when the action was IGNORED (a native dialog is in
+/// flight, or there is no doc at `index`) — the caller returns early without the applied log;
+/// returns `None` when it was applied.
+fn close_tab(ws: &mut Workspace, index: usize, app_state: Option<&AppState>) -> Option<()> {
+    let action = EditorAction::CloseTab(index);
+    if app_state.is_some_and(dialog_in_flight) {
+        log::debug!(
+            "action {action:?} ignored: a file dialog is in flight \
+             (active={}, docs={}, pending_close={:?}, pending_quit={})",
+            ws.active,
+            ws.docs.len(),
+            ws.pending_close,
+            ws.pending_quit
+        );
+        return Some(());
+    }
+    let Some(dirty) = ws.docs.get(index).map(|doc| doc.dirty) else {
+        log::debug!(
+            "action {action:?} ignored: no doc at index {index} (docs={})",
+            ws.docs.len()
+        );
+        return Some(());
+    };
+    match close_decision(dirty) {
+        CloseDecision::CloseNow => ops::close_doc(ws, index),
+        CloseDecision::Confirm => ws.pending_close = Some(index),
+    }
+    None
 }
 
 /// Applies one user intent to the workspace. Pure with respect to the GUI: the only engine
@@ -137,47 +194,11 @@ pub fn apply_action(
         EditorAction::Open => {
             request_dialog(&mut fx, app_state, AsyncFileDialogRequest::OpenDialogue);
         }
-        EditorAction::Save => {
-            let path = ws.active_doc().and_then(|doc| doc.path.clone());
-            match path {
-                Some(path) => {
-                    let result = ws.active_doc_mut().map(|doc| ops::save_doc(doc, &path));
-                    if let Some(Err(err)) = result {
-                        ws.notifications.push(ops::error_notification(&err));
-                    }
-                }
-                // Untitled (or no) active doc: Save behaves like Save As.
-                None => {
-                    log::debug!(
-                        "action {action:?}: active doc has no path, falling back to Save As"
-                    );
-                    request_save_as(&mut fx, app_state, ws);
-                }
-            }
-        }
+        EditorAction::Save => save_active(ws, &mut fx, app_state),
         EditorAction::SaveAs => request_save_as(&mut fx, app_state, ws),
         EditorAction::CloseTab(index) => {
-            if app_state.is_some_and(dialog_in_flight) {
-                log::debug!(
-                    "action {action:?} ignored: a file dialog is in flight \
-                     (active={}, docs={}, pending_close={:?}, pending_quit={})",
-                    ws.active,
-                    ws.docs.len(),
-                    ws.pending_close,
-                    ws.pending_quit
-                );
+            if close_tab(ws, index, app_state).is_some() {
                 return fx;
-            }
-            let Some(dirty) = ws.docs.get(index).map(|doc| doc.dirty) else {
-                log::debug!(
-                    "action {action:?} ignored: no doc at index {index} (docs={})",
-                    ws.docs.len()
-                );
-                return fx;
-            };
-            match close_decision(dirty) {
-                CloseDecision::CloseNow => ops::close_doc(ws, index),
-                CloseDecision::Confirm => ws.pending_close = Some(index),
             }
         }
         EditorAction::Quit => match quit_decision(ws) {
@@ -185,25 +206,22 @@ pub fn apply_action(
             QuitDecision::Confirm => ws.pending_quit = true,
         },
         EditorAction::FrameAll { viewport } => {
-            // No active doc: no-op.
-            if let Some(doc) = ws.active_doc_mut() {
-                frame_doc(doc, viewport);
-            }
+            with_active_doc(ws, |doc| frame_doc(doc, viewport));
         }
         EditorAction::Relayout { viewport } => {
-            // No active doc: no-op. auto_layout writes positions via set_node_pos (view-only,
-            // never dirty) and frame_doc only sets the camera.
-            if let Some(doc) = ws.active_doc_mut() {
+            // auto_layout writes positions via set_node_pos (view-only, never dirty) and
+            // frame_doc only sets the camera.
+            with_active_doc(ws, |doc| {
                 auto_layout(doc);
                 frame_doc(doc, viewport);
-            }
+            });
         }
         EditorAction::ShowControls => {
             ws.show_controls = true;
         }
         EditorAction::AddNodeAt(world) => add_node_and_select(ws, world),
         EditorAction::AddNode { viewport } => {
-            // No active doc: no-op. The screen centre maps to the camera target.
+            // The screen centre maps to the camera target.
             let world = ws
                 .active_doc()
                 .map(|doc| screen_to_world(&doc.camera, viewport, viewport / 2.0));
@@ -211,29 +229,17 @@ pub fn apply_action(
                 add_node_and_select(ws, world);
             }
         }
-        EditorAction::DeleteNode(key) => {
-            // No active doc or unknown key: no-op (the mutator no-ops on unknown keys).
-            if let Some(doc) = ws.active_doc_mut() {
-                doc.delete_node(key);
-            }
-        }
-        EditorAction::SetStart(key) => {
-            // No active doc or unknown key: no-op (the mutator no-ops on unknown keys).
-            if let Some(doc) = ws.active_doc_mut() {
-                doc.set_start(key);
-            }
-        }
+        EditorAction::DeleteNode(key) => with_active_doc(ws, |doc| doc.delete_node(key)),
+        EditorAction::SetStart(key) => with_active_doc(ws, |doc| doc.set_start(key)),
         EditorAction::DeleteSelected => {
-            // No active doc or no selection: no-op.
-            if let Some(doc) = ws.active_doc_mut()
-                && let Some(key) = doc.selected
-            {
-                doc.delete_node(key);
-            }
+            with_active_doc(ws, |doc| {
+                if let Some(key) = doc.selected {
+                    doc.delete_node(key);
+                }
+            });
         }
         EditorAction::FocusNode(key) => {
-            // No active doc or unknown key: no-op.
-            if let Some(doc) = ws.active_doc_mut() {
+            with_active_doc(ws, |doc| {
                 let centre = doc.node(key).map(|node| {
                     let (min, max) = node_rect(node);
                     (min + max) / 2.0
@@ -243,7 +249,7 @@ pub fn apply_action(
                     let camera = doc.camera;
                     doc.set_camera(center_on(&camera, centre));
                 }
-            }
+            });
         }
         EditorAction::ToggleProblems => {
             ws.problems_hidden = !ws.problems_hidden;
@@ -261,10 +267,10 @@ pub fn apply_action(
 
 /// Appends a node at `world` in the active doc and selects it; no-op without an active doc.
 fn add_node_and_select(ws: &mut Workspace, world: Vec2) {
-    if let Some(doc) = ws.active_doc_mut() {
+    with_active_doc(ws, |doc| {
         let key = doc.add_node(world);
         doc.select(Some(key));
-    }
+    });
 }
 
 /// Routes a dialog request: straight to the dialog layer when an `AppState` is available,
@@ -296,8 +302,8 @@ fn request_save_as(fx: &mut ActionEffects, app_state: Option<&AppState>, ws: &Wo
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::model::{CamState, Link, Outputs, Slot};
-    use crate::scenes::editor::testkit::{TempDir, fixture};
+    use crate::model::{CamState, Link, Outputs};
+    use crate::scenes::editor::testkit::{TempDir, fixture, ws_with_two_linked_nodes};
     use aberredengine::prelude::Vec2;
 
     /// A workspace with one valid dirty doc (one node, so the engine gate passes).
@@ -610,21 +616,6 @@ mod tests {
         let fx = apply_action(&mut ws, EditorAction::Quit, None);
         assert!(!fx.quit, "dirty workspace must not quit yet");
         assert!(ws.pending_quit, "the confirm modal is requested");
-    }
-
-    /// A workspace with one clean doc holding `a --next--> b`, start = a, no selection.
-    fn ws_with_two_linked_nodes() -> (Workspace, NodeKey, NodeKey) {
-        let mut ws = Workspace::default();
-        ops::new_doc(&mut ws);
-        let (a, b) = {
-            let doc = ws.active_doc_mut().unwrap();
-            let a = doc.add_node(Vec2::ZERO);
-            let b = doc.add_node(Vec2::new(100.0, 0.0));
-            doc.set_link(a, Slot::Next, Link::Node(b));
-            doc.mark_clean();
-            (a, b)
-        };
-        (ws, a, b)
     }
 
     #[test]

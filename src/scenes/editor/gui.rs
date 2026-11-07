@@ -5,7 +5,7 @@ use aberredengine::prelude::*;
 use super::{
     actions, context_menu, inspector, menu, modals, nodes, problems, shortcuts, status, tabs,
 };
-use crate::state::{UiCaptureHandle, WorkspaceMutex};
+use crate::state::{UiCaptureHandle, with_workspace};
 use crate::systems::file_dialogs::{dialog_in_flight, request_async_dialog};
 
 /// Scene GUI callback (render thread). Publishes imgui's capture flags into the shared `UiCapture`
@@ -27,16 +27,13 @@ pub fn gui(ctx: &mut GuiCtx) {
 
     // Brief snapshot for the menu/shortcut enabled states and the Problems check mark; the
     // guard is dropped immediately.
-    let (active, problems_visible) =
-        ctx.app_state
-            .get::<WorkspaceMutex>()
-            .map_or((None, true), |handle| {
-                let ws = handle.lock().unwrap();
-                (
-                    ws.active_doc().is_some().then_some(ws.active),
-                    !ws.problems_hidden,
-                )
-            });
+    let (active, problems_visible) = with_workspace(ctx.app_state, |ws| {
+        (
+            ws.active_doc().is_some().then_some(ws.active),
+            !ws.problems_hidden,
+        )
+    })
+    .unwrap_or((None, true));
 
     let mut action_queue = Vec::new();
     menu::draw(ctx, active, problems_visible, &mut action_queue);
@@ -56,15 +53,15 @@ pub fn gui(ctx: &mut GuiCtx) {
     // applied by tab index, and closing a tab would shift the indices. Open/Save As requests
     // are already ignored inside `request_async_dialog`.
     let dialog_busy = dialog_in_flight(ctx.app_state);
-    if let Some(handle) = ctx.app_state.get::<WorkspaceMutex>().cloned() {
-        for action in action_queue {
-            if dialog_busy && matches!(action, actions::EditorAction::CloseTab(_)) {
-                continue;
-            }
-            let fx = {
-                let mut ws = handle.lock().unwrap();
-                actions::apply_action(&mut ws, action, None)
-            };
+    for action in action_queue {
+        if dialog_busy && matches!(action, actions::EditorAction::CloseTab(_)) {
+            continue;
+        }
+        // One short lock per action; the returned dialog request is dispatched after the
+        // guard drops.
+        if let Some(fx) =
+            with_workspace(ctx.app_state, |ws| actions::apply_action(ws, action, None))
+        {
             if fx.quit {
                 ctx.intents.request_quit();
             }

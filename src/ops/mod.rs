@@ -215,43 +215,13 @@ pub fn error_notification(err: &OpError) -> Notification {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::scenes::editor::testkit::{TempDir, fixture};
     use aberredengine::prelude::{Vec2, load_dialogue};
 
     const GUARD_JSON: &str = include_str!(concat!(
         env!("CARGO_MANIFEST_DIR"),
         "/tests/fixtures/guard.json"
     ));
-
-    fn fixture(name: &str) -> PathBuf {
-        PathBuf::from(env!("CARGO_MANIFEST_DIR"))
-            .join("tests/fixtures")
-            .join(name)
-    }
-
-    /// A unique temp directory per test, removed on drop.
-    struct TempDir(PathBuf);
-
-    impl TempDir {
-        fn new(name: &str) -> Self {
-            let dir = std::env::temp_dir().join(format!(
-                "aberred-dialogue-ops-{}-{name}",
-                std::process::id()
-            ));
-            let _ = std::fs::remove_dir_all(&dir);
-            std::fs::create_dir_all(&dir).expect("create the temp dir");
-            Self(dir)
-        }
-
-        fn join(&self, name: &str) -> PathBuf {
-            self.0.join(name)
-        }
-    }
-
-    impl Drop for TempDir {
-        fn drop(&mut self) {
-            let _ = std::fs::remove_dir_all(&self.0);
-        }
-    }
 
     /// `path.canonicalize()`, for comparing against the canonical paths ops stores on docs.
     fn canon(path: &Path) -> PathBuf {
@@ -290,7 +260,7 @@ mod tests {
 
     #[test]
     fn open_save_reload_round_trips_the_def() {
-        let tmp = TempDir::new("roundtrip");
+        let tmp = TempDir::new("ops", "roundtrip");
         let mut ws = Workspace::default();
         let outcome = open_guard(&mut ws);
         assert_eq!(outcome, OpenOutcome::Opened { warnings: vec![] });
@@ -325,7 +295,7 @@ mod tests {
 
     #[test]
     fn saved_file_passes_the_engine_load_dialogue() {
-        let tmp = TempDir::new("engine-load");
+        let tmp = TempDir::new("ops", "engine-load");
         let mut ws = Workspace::default();
         open_guard(&mut ws);
         let save_path = tmp.join("guard.json");
@@ -341,7 +311,7 @@ mod tests {
             ("invalid_dup_id.json", "duplicate dialogue node id"),
             ("invalid_no_start.json", "is not among the defined nodes"),
         ];
-        let tmp = TempDir::new("gate");
+        let tmp = TempDir::new("ops", "gate");
         for (i, &(name, needle)) in cases.iter().enumerate() {
             let mut ws = Workspace::default();
             open_path(&mut ws, &fixture(name))
@@ -410,7 +380,7 @@ mod tests {
 
     #[test]
     fn open_reports_json_and_io_errors_with_the_path() {
-        let tmp = TempDir::new("open-errors");
+        let tmp = TempDir::new("ops", "open-errors");
         let mut ws = Workspace::default();
 
         let bad = tmp.join("bad.json");
@@ -480,7 +450,7 @@ mod tests {
 
     #[test]
     fn successful_save_marks_clean_sets_canonical_path_and_leaves_no_tmp() {
-        let tmp = TempDir::new("save-clean");
+        let tmp = TempDir::new("ops", "save-clean");
         let mut ws = Workspace::default();
         open_guard(&mut ws);
         let doc = ws.active_doc_mut().unwrap();
@@ -501,7 +471,7 @@ mod tests {
 
     #[test]
     fn save_doc_at_out_of_range_is_io_no_such_document() {
-        let tmp = TempDir::new("save-at-range");
+        let tmp = TempDir::new("ops", "save-at-range");
         let mut ws = Workspace::default();
         new_doc(&mut ws);
         let out = tmp.join("out.json");
@@ -515,7 +485,7 @@ mod tests {
 
     #[test]
     fn save_doc_at_collision_with_another_tab_writes_nothing() {
-        let tmp = TempDir::new("save-at-collision");
+        let tmp = TempDir::new("ops", "save-at-collision");
         let mut ws = Workspace::default();
         open_guard(&mut ws); // doc 0: canonical guard.json
         open_path(&mut ws, &fixture("loops.json")).unwrap(); // doc 1, active
@@ -558,7 +528,7 @@ mod tests {
 
     #[test]
     fn save_doc_at_success_saves_through_save_doc_and_allows_its_own_path() {
-        let tmp = TempDir::new("save-at-ok");
+        let tmp = TempDir::new("ops", "save-at-ok");
         let mut ws = Workspace::default();
         new_doc(&mut ws);
         ws.active_doc_mut().unwrap().add_node(Vec2::ZERO);

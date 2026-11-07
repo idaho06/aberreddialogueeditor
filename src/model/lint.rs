@@ -149,11 +149,6 @@ fn out_links(out: &Outputs) -> impl Iterator<Item = &Link> {
         .chain(choices.iter().map(|choice| &choice.target))
 }
 
-/// True when `problems` contains at least one [`Severity::Error`].
-pub fn has_errors(problems: &[Problem]) -> bool {
-    problems.iter().any(|p| p.severity == Severity::Error)
-}
-
 /// The save gate: the engine's own validation of `to_def(doc)`. Never reimplemented in the model.
 pub fn engine_gate(doc: &DialogueDoc) -> Result<(), DialogueError> {
     DialogueTree::try_from(to_def(doc)).map(|_| ())
@@ -165,6 +160,11 @@ mod tests {
     use crate::model::convert::{from_def, to_def};
     use crate::model::doc::{DialogueDoc, NodeKey, Outputs, Slot};
     use aberredengine::prelude::{DialogueDef, Vec2};
+
+    /// True when `problems` contains at least one [`Severity::Error`].
+    fn has_errors(problems: &[Problem]) -> bool {
+        problems.iter().any(|p| p.severity == Severity::Error)
+    }
 
     macro_rules! fixture {
         ($name:literal) => {

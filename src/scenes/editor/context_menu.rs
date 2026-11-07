@@ -18,7 +18,7 @@ use aberredengine::prelude::*;
 
 use super::actions::EditorAction;
 use crate::model::ContextMenuRequest;
-use crate::state::WorkspaceMutex;
+use crate::state::with_workspace;
 
 /// imgui id of the context-menu popup.
 const POPUP_ID: &str = "graph_ctx";
@@ -46,10 +46,7 @@ pub fn items_for(request: ContextMenuRequest) -> Vec<(&'static str, EditorAction
 /// [`EditorAction`] and closes the popup; the queued actions are applied by
 /// [`crate::scenes::editor::gui`] afterwards.
 pub fn draw(ctx: &mut GuiCtx, actions: &mut Vec<EditorAction>) {
-    let request = ctx
-        .app_state
-        .get::<WorkspaceMutex>()
-        .and_then(|handle| handle.lock().unwrap().pending_context_menu.take());
+    let request = with_workspace(ctx.app_state, |ws| ws.pending_context_menu.take()).flatten();
     if let Some(request) = request {
         PENDING.with(|pending| pending.set(Some(request)));
         ctx.ui.open_popup(POPUP_ID);

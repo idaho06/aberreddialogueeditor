@@ -15,12 +15,13 @@ mod effects;
 mod expr;
 mod node_fields;
 mod outputs;
+mod widgets;
 
 use aberredengine::prelude::imgui::Condition;
 use aberredengine::prelude::*;
 
 use crate::model::{DialogueDoc, EdChoice, EdNode, Link, NodeKey, Outputs, ProblemKind, Slot};
-use crate::state::WorkspaceMutex;
+use crate::state::with_workspace;
 use node_fields::NodeFlags;
 
 /// The two output modes of a node, switched by the Inspector's "Next" / "Choices" radio buttons.
@@ -34,8 +35,8 @@ pub enum OutputsMode {
 
 /// One requested change to a node, produced by the inspector widgets and applied by
 /// [`apply_edits`]. The payloads carry node content, so they must never be logged.
-// The `Set*` variant names are the plan-04 API (Edit::SetText etc.), so the common-prefix lint
-// is allowed here on purpose.
+// The `Set*` variant names mirror the doc mutators, so the common-prefix lint is allowed here
+// on purpose.
 #[allow(clippy::enum_variant_names)]
 #[derive(Debug, Clone, PartialEq)]
 pub enum Edit {
@@ -227,28 +228,27 @@ fn node_flags(doc: &mut DialogueDoc, key: NodeKey) -> NodeFlags {
 
 /// Locks the workspace briefly and clones what the panel needs; the guard is dropped on return.
 fn snapshot(app_state: &AppState) -> Panel {
-    let Some(handle) = app_state.get::<WorkspaceMutex>() else {
-        return Panel::NoDoc;
-    };
-    let mut ws = handle.lock().unwrap();
-    let Some(doc) = ws.active_doc_mut() else {
-        return Panel::NoDoc;
-    };
-    let Some(key) = doc.selected else {
-        return Panel::NothingSelected;
-    };
-    let Some(node) = doc.node(key).cloned() else {
-        // The selected key vanished (e.g. the node was deleted): treat as no selection.
-        return Panel::NothingSelected;
-    };
-    let flags = node_flags(doc, key);
-    let targets = doc.nodes.iter().map(|n| (n.key, n.id.clone())).collect();
-    Panel::Node(Box::new(NodeSnap {
-        doc_id: doc.doc_id,
-        node,
-        flags,
-        targets,
-    }))
+    with_workspace(app_state, |ws| {
+        let Some(doc) = ws.active_doc_mut() else {
+            return Panel::NoDoc;
+        };
+        let Some(key) = doc.selected else {
+            return Panel::NothingSelected;
+        };
+        let Some(node) = doc.node(key).cloned() else {
+            // The selected key vanished (e.g. the node was deleted): treat as no selection.
+            return Panel::NothingSelected;
+        };
+        let flags = node_flags(doc, key);
+        let targets = doc.nodes.iter().map(|n| (n.key, n.id.clone())).collect();
+        Panel::Node(Box::new(NodeSnap {
+            doc_id: doc.doc_id,
+            node,
+            flags,
+            targets,
+        }))
+    })
+    .unwrap_or(Panel::NoDoc)
 }
 
 /// Draws the Inspector window for the active doc's selected node and applies the edits the
@@ -288,12 +288,11 @@ pub fn draw(ctx: &mut GuiCtx) {
     let Some(doc_id) = doc_id else {
         return;
     };
-    if let Some(handle) = ctx.app_state.get::<WorkspaceMutex>().cloned() {
-        let mut ws = handle.lock().unwrap();
+    with_workspace(ctx.app_state, |ws| {
         if let Some(doc) = ws.active_doc_mut().filter(|doc| doc.doc_id == doc_id) {
             apply_edits(doc, &edits);
         }
-    }
+    });
 }
 
 #[cfg(test)]

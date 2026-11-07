@@ -11,8 +11,7 @@
 use aberredengine::prelude::DialogueEffect;
 use aberredengine::prelude::imgui::Ui;
 
-/// Faint red for the "(empty key)" hint (dimmer than the lint-error red).
-const FAINT_RED: [f32; 4] = [1.0, 0.45, 0.45, 0.55];
+use super::widgets::{RowAction, key_editor, reorder_delete_row, type_combo};
 
 /// The six effect kinds the type combo can switch between.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -131,15 +130,6 @@ pub fn move_item<T>(items: &mut Vec<T>, index: usize, delta: i32) {
     }
 }
 
-/// The key input shared by every effect kind, plus the faint-red "(empty key)" hint when empty.
-fn key_editor(ui: &Ui, key: &mut String) -> bool {
-    let changed = ui.input_text("Key", key).build();
-    if key.is_empty() {
-        ui.text_colored(FAINT_RED, "(empty key)");
-    }
-    changed
-}
-
 /// The effects list editor. Each row (wrapped in `push_id_usize(i)`) holds a type combo
 /// (picking another kind calls [`convert_effect`]), a key input, a value widget per kind
 /// (`input_int` for SetInteger value / AddInteger delta, `input_float` for SetScalar value, a
@@ -157,21 +147,15 @@ pub fn effects_editor(ui: &Ui, effects: &mut Vec<DialogueEffect>) -> bool {
 
         // Type combo: picking another kind converts the effect (the key is kept).
         let current = EffectKind::of(effect);
-        if let Some(combo) = ui.begin_combo("Type##effect_type", current.name()) {
-            for (j, kind) in EffectKind::KINDS.iter().enumerate() {
-                let _entry = ui.push_id_usize(j);
-                if ui
-                    .selectable_config(kind.name())
-                    .selected(*kind == current)
-                    .build()
-                    && *kind != current
-                {
-                    *effect = convert_effect(effect, *kind);
-                    changed = true;
-                }
-            }
-            combo.end();
-        }
+        changed |= type_combo(
+            ui,
+            "Type##effect_type",
+            current.name(),
+            current,
+            &EffectKind::KINDS,
+            |kind| kind.name(),
+            |kind| *effect = convert_effect(effect, kind),
+        );
 
         changed |= key_editor(ui, effect_key_mut(effect));
 
@@ -197,22 +181,10 @@ pub fn effects_editor(ui: &Ui, effects: &mut Vec<DialogueEffect>) -> bool {
         }
 
         // Up (disabled on the first) / Down (disabled on the last) / Delete on one row.
-        if i == 0 {
-            let _disabled = ui.begin_disabled(true);
-            ui.small_button("Up");
-        } else if ui.small_button("Up") {
-            reorder = Some((i, -1));
-        }
-        ui.same_line();
-        if i == last {
-            let _disabled = ui.begin_disabled(true);
-            ui.small_button("Down");
-        } else if ui.small_button("Down") {
-            reorder = Some((i, 1));
-        }
-        ui.same_line();
-        if ui.small_button("Delete") {
-            remove = Some(i);
+        match reorder_delete_row(ui, i, last) {
+            Some(RowAction::Move(delta)) => reorder = Some((i, delta)),
+            Some(RowAction::Delete) => remove = Some(i),
+            None => {}
         }
     }
     if let Some((i, delta)) = reorder {
