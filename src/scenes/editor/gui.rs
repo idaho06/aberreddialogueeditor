@@ -56,9 +56,10 @@ pub fn gui(ctx: &mut GuiCtx) {
     if action_queue.is_empty() && !modal_quit {
         return;
     }
-    // While a native dialog is in flight, tab closes are ignored: a pending Save As result is
-    // applied by tab index, and closing a tab would shift the indices. Open/Save As requests
-    // are already ignored inside `request_async_dialog`.
+    // While a native dialog is in flight, tab closes are ignored: one dialog at a time, so a
+    // close and a dialog result never interleave. (The pending Save As itself is keyed by the
+    // doc's doc_id, so a tab closed meanwhile could no longer redirect the save — the skip
+    // stays.) Open/Save As requests are already ignored inside `request_async_dialog`.
     let dialog_busy = dialog_in_flight(ctx.app_state);
     for action in action_queue {
         if dialog_busy && matches!(action, actions::EditorAction::CloseTab(_)) {

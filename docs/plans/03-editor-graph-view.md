@@ -542,5 +542,8 @@ CONSTRAINTS: scope only. DONE WHEN: `just check` passes and `timeout 15 cargo ru
 - **Save As / Discard index race:** a Save As dialog started while the "unsaved changes" modal is open, followed by
   Discard, can shift the tab index the dialog saves to. Fix idea: ignore Save As and Discard while a dialog is in
   flight, or key the pending Save As by `doc_id` (available from step 2a) instead of the tab index.
+  **FIXED:** the pending Save As is keyed by `doc_id` (see the commit that introduced the `doc_id`-keyed
+  `SaveDialogueAs` request/result), so closing/shifting tabs while the picker is open cannot redirect the save; the
+  unsaved-changes modal's Save also closes the tab after a successful save (`close_after`).
 - **Window X button:** the engine polls raylib's `window_should_close()` directly, so closing the OS window with
   unsaved changes quits without asking. Needs an engine hook (note for the engine backlog).

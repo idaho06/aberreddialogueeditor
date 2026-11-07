@@ -162,7 +162,10 @@ Full detail in `docs/gotchas.md`. The rules that prevent bugs:
   `EditorAction`, applied in ONE place: `scenes/editor::actions::apply_action` (pure over `Workspace`; native
   dialog requests go through its `Option<&AppState>` parameter — the GUI passes `None` under the lock and
   dispatches the returned request after). `gui.rs` collects the frame's actions and applies them; while a
-  native dialog is in flight, `CloseTab` actions are skipped (a pending Save As is applied by tab index).
+  native dialog is in flight, `CloseTab` actions are skipped (a pending Save As is keyed by the doc's unique,
+  never-reused `doc_id` — closing/shifting tabs while the picker is open cannot redirect the save; the
+  unsaved-changes modal's Save on an untitled doc requests the picker with `close_after`, so the tab closes
+  after a successful save).
   Save As — and Save on an untitled doc, which falls back to Save As — runs `ops::check_saveable` first: a
   doc the engine would reject pushes a SaveRejected notification and `fx.dialog` stays `None`, so no picker
   opens.

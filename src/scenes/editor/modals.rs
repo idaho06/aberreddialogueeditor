@@ -7,7 +7,8 @@
 //! Locking: the workspace is locked to snapshot the modal state, the guard is dropped while
 //! the widgets are drawn, and a button click is applied with a fresh short lock. The Save As
 //! dialog request (untitled doc in the close modal, after its save pre-check passes) happens
-//! after that lock is released.
+//! after that lock is released; it is keyed by the doc's `doc_id` and carries `close_after`, so
+//! the tab closes after a successful save.
 
 use aberredengine::prelude::imgui::Ui;
 use aberredengine::prelude::*;
@@ -170,9 +171,11 @@ enum ChoiceEffect {
     Nothing,
     /// The caller must run `intents.request_quit()` ("Discard and quit").
     Quit,
-    /// The caller must request the Save As dialog for the tab (untitled doc in the close modal).
+    /// The caller must request the Save As dialog for the doc with this unique, never-reused
+    /// `doc_id` (untitled doc in the close modal), with `close_after: true` so the tab closes
+    /// after a successful save.
     SaveAsDialog {
-        doc_index: usize,
+        doc_id: u64,
     },
 }
 
@@ -212,7 +215,10 @@ fn apply_choice_ws(ws: &mut Workspace, choice: ModalChoice) -> ChoiceEffect {
                 None => {
                     // Untitled doc: run the save pre-check (the same gate/message save_doc
                     // enforces) BEFORE handing over to the Save As dialog, so a doc the engine
-                    // would reject never opens a picker. The tab stays open.
+                    // would reject never opens a picker. The tab stays open. The dialog request
+                    // is keyed by the doc's unique doc_id (tabs may shift while the picker is
+                    // open) and carries close_after, so a successful save closes the tab.
+                    let doc_id = ws.docs[index].doc_id;
                     ws.pending_close = None;
                     let check = ops::check_saveable(&ws.docs[index]);
                     if let Err(err) = check {
@@ -222,8 +228,10 @@ fn apply_choice_ws(ws: &mut Workspace, choice: ModalChoice) -> ChoiceEffect {
                         ws.notifications.push(ops::error_notification(&err));
                         return ChoiceEffect::Nothing;
                     }
-                    log::debug!("modal {choice:?}: tab {index} is untitled, Save As dialog next");
-                    return ChoiceEffect::SaveAsDialog { doc_index: index };
+                    log::debug!(
+                        "modal {choice:?}: tab {index} (doc {doc_id}) is untitled, Save As dialog next"
+                    );
+                    return ChoiceEffect::SaveAsDialog { doc_id };
                 }
             }
         }
@@ -273,10 +281,14 @@ fn apply_choice(app_state: &AppState, choice: Option<ModalChoice>) -> bool {
     match effect {
         ChoiceEffect::Nothing => false,
         ChoiceEffect::Quit => true,
-        ChoiceEffect::SaveAsDialog { doc_index } => {
+        ChoiceEffect::SaveAsDialog { doc_id } => {
+            // close_after: the unsaved-changes Save closes the tab once the save succeeded.
             request_async_dialog(
                 app_state,
-                AsyncFileDialogRequest::SaveDialogueAs { doc_index },
+                AsyncFileDialogRequest::SaveDialogueAs {
+                    doc_id,
+                    close_after: true,
+                },
             );
             false
         }
@@ -311,14 +323,15 @@ mod tests {
     }
 
     #[test]
-    fn close_save_on_an_untitled_valid_doc_returns_the_save_as_dialog() {
+    fn close_save_on_an_untitled_valid_doc_returns_the_save_as_dialog_with_the_doc_id() {
         let mut ws = Workspace::default();
         ops::new_doc(&mut ws);
         ws.active_doc_mut().unwrap().add_node(Vec2::ZERO); // one node = start: valid
+        let doc_id = ws.docs[0].doc_id;
         ws.pending_close = Some(0);
         assert_eq!(
             apply_choice_ws(&mut ws, ModalChoice::CloseSave),
-            ChoiceEffect::SaveAsDialog { doc_index: 0 }
+            ChoiceEffect::SaveAsDialog { doc_id }
         );
         assert_eq!(ws.pending_close, None);
         assert!(ws.notifications.is_empty(), "a passing pre-check is silent");

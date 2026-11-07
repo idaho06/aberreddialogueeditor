@@ -291,6 +291,8 @@ fn request_dialog(
 /// The Save As arm: runs the save pre-check ([`ops::check_saveable`], the same predicate and
 /// message `ops::save_doc` enforces) BEFORE any native picker opens — a doc the engine would
 /// reject pushes a SaveRejected notification onto `ws.notifications` and requests no dialog.
+/// The request is keyed by the active doc's unique, never-reused `doc_id` (not its tab index),
+/// so tabs closed or shifted while the picker is open cannot redirect the save.
 /// No active doc: no-op (no dialog, no notification).
 fn request_save_as(
     fx: &mut ActionEffects,
@@ -298,22 +300,23 @@ fn request_save_as(
     ws: &mut Workspace,
     action: EditorAction,
 ) {
-    let gate = ws.active_doc().map(ops::check_saveable);
-    let Some(result) = gate else {
+    let Some(doc) = ws.active_doc() else {
         return;
     };
-    if let Err(err) = result {
+    if let Err(err) = ops::check_saveable(doc) {
         log::debug!(
             "action {action:?}: save pre-check rejected the active doc, no dialog requested"
         );
         ws.notifications.push(ops::error_notification(&err));
         return;
     }
+    let doc_id = doc.doc_id;
     request_dialog(
         fx,
         app_state,
         AsyncFileDialogRequest::SaveDialogueAs {
-            doc_index: ws.active,
+            doc_id,
+            close_after: false,
         },
     );
 }
@@ -410,26 +413,35 @@ mod tests {
     }
 
     #[test]
-    fn save_as_queues_the_save_dialog_for_the_active_doc() {
+    fn save_as_queues_the_save_dialog_for_the_active_docs_doc_id() {
         let mut ws = ws_with_dirty_valid_doc();
         ops::new_doc(&mut ws); // active doc is now index 1
         // An empty new doc has no start and would be rejected up front: make it valid.
         ws.active_doc_mut().unwrap().add_node(Vec2::ZERO);
+        assert_eq!(ws.active, 1, "the second doc is active");
+        let active_id = ws.active_doc().unwrap().doc_id;
         let fx = apply_action(&mut ws, EditorAction::SaveAs, None);
-        assert!(matches!(
-            fx.dialog,
-            Some(AsyncFileDialogRequest::SaveDialogueAs { doc_index: 1 })
-        ));
+        assert!(
+            matches!(
+                fx.dialog,
+                Some(AsyncFileDialogRequest::SaveDialogueAs { doc_id, close_after: false })
+                    if doc_id == active_id
+            ),
+            "the request carries the ACTIVE doc's doc_id, not its index: {:?}",
+            fx.dialog
+        );
         assert!(ws.notifications.is_empty(), "a passing pre-check is silent");
     }
 
     #[test]
-    fn save_as_on_a_valid_doc_still_queues_the_dialog() {
+    fn save_as_on_a_valid_doc_still_queues_the_dialog_with_the_doc_id() {
         let mut ws = ws_with_dirty_valid_doc();
+        let doc_id = ws.active_doc().unwrap().doc_id;
         let fx = apply_action(&mut ws, EditorAction::SaveAs, None);
         assert!(matches!(
             fx.dialog,
-            Some(AsyncFileDialogRequest::SaveDialogueAs { doc_index: 0 })
+            Some(AsyncFileDialogRequest::SaveDialogueAs { doc_id: id, close_after: false })
+                if id == doc_id
         ));
         assert!(ws.notifications.is_empty());
     }
@@ -491,16 +503,25 @@ mod tests {
     }
 
     #[test]
-    fn save_without_a_path_behaves_like_save_as() {
+    fn save_without_a_path_behaves_like_save_as_with_the_active_doc_id() {
         let mut ws = ws_with_dirty_valid_doc();
-        assert!(ws.active_doc().unwrap().path.is_none());
+        ops::new_doc(&mut ws); // second, untitled doc is active
+        ws.active_doc_mut().unwrap().add_node(Vec2::ZERO); // valid
+        assert_eq!(ws.active, 1);
+        assert!(ws.active_doc().unwrap().path.is_none(), "untitled");
+        let active_id = ws.active_doc().unwrap().doc_id;
         let fx = apply_action(&mut ws, EditorAction::Save, None);
-        assert!(matches!(
-            fx.dialog,
-            Some(AsyncFileDialogRequest::SaveDialogueAs { doc_index: 0 })
-        ));
+        assert!(
+            matches!(
+                fx.dialog,
+                Some(AsyncFileDialogRequest::SaveDialogueAs { doc_id, close_after: false })
+                    if doc_id == active_id
+            ),
+            "Save on an untitled valid doc requests Save As for the ACTIVE doc's id: {:?}",
+            fx.dialog
+        );
         assert!(ws.notifications.is_empty());
-        assert!(ws.docs.len() == 1 && ws.active_doc().unwrap().dirty);
+        assert!(ws.docs.len() == 2 && ws.active_doc().unwrap().dirty);
     }
 
     #[test]

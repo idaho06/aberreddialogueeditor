@@ -130,7 +130,10 @@ at debug — events only.
 status bar → context menu → modals. Menu/shortcut/tab/context-menu/problem-row intents are collected as
 `EditorAction`s and applied in ONE place, `actions::apply_action(ws, action, None)` under a short lock (native
 dialog requests come back in `ActionEffects::dialog` and are dispatched after the guard drops; `fx.quit` calls
-`intents.request_quit()`). While a native dialog is in flight, `CloseTab` actions are skipped. Save As — and
+`intents.request_quit()`). While a native dialog is in flight, `CloseTab` actions are skipped (the pending Save As is
+keyed by the doc's unique `doc_id`, so closing/shifting tabs while the picker is open cannot redirect the save; the
+unsaved-changes modal's Save on an untitled doc requests the picker with `close_after`, so the tab closes after a
+successful save). Save As — and
 Save on an untitled doc, which falls back to it, plus the close modal's Save on an untitled doc — is pre-checked
 with `ops::check_saveable` before any picker is requested: a doc the engine would reject pushes a SaveRejected
 notification and no dialog is requested.
@@ -168,7 +171,11 @@ Doc paths are stored canonical/absolute; `doc_title` is the file name or "Untitl
 `src/systems/file_dialogs.rs` bridges rfd: the GUI calls `request_async_dialog` (at most one dialog in flight;
 the future is built on the caller thread, driven on a worker via `futures::executor::block_on`, result over a
 crossbeam channel in `AsyncFileDialogMutex`); `poll_async_dialogs` (logic thread) drains it once per tick and
-applies it through the pure `apply_result`, pushing failures into `Workspace.notifications`.
+applies it through the pure `apply_result`, pushing failures into `Workspace.notifications`. A Save As request
+carries the target doc's unique `doc_id` (plus a `close_after` flag) through the worker to the result; `apply_result`
+looks up the doc's CURRENT tab index by `doc_id` at apply time — a doc closed while the picker was open is ignored
+with one debug log, nothing is written — and on a successful save closes the doc when `close_after` was set (the
+unsaved-changes modal's Save on an untitled doc).
 
 ## Module map
 
@@ -219,7 +226,7 @@ applies it through the pure `apply_result`, pushing failures into `Workspace.not
 | `src/scenes/editor/actions.rs` | `EditorAction`, `ActionEffects`, the single `apply_action`, `tab_label`, `close_decision`, `quit_decision` |
 | `src/systems/mod.rs` | `file_dialogs`, `setup`, `window_resize` |
 | `src/systems/setup.rs` | `on_setup` — inserts `UiCaptureHandle`, `WorkspaceMutex`, `AsyncFileDialogMutex` into `AppState` once |
-| `src/systems/file_dialogs.rs` | rfd bridge: `request_async_dialog`, `dialog_in_flight`, `drain_completed`, pure `apply_result`, `poll_async_dialogs` |
+| `src/systems/file_dialogs.rs` | rfd bridge: `request_async_dialog`, `dialog_in_flight`, `drain_completed`, pure `apply_result` (Save As keyed by `doc_id`, `close_after` closes the doc after a successful save), `poll_async_dialogs` |
 | `src/systems/window_resize.rs` | `WindowResized` observer: `GameConfig::set_render_size` + re-centre the camera offset (mouse coords stay 1:1) |
 
 ## How to add ...
