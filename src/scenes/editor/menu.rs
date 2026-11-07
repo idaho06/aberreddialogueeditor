@@ -1,7 +1,7 @@
 //! The main menu bar. Menu items produce [`EditorAction`]s (applied later by
 //! [`crate::scenes::editor::gui`]): the File items, Edit > "Add node", View > "Re-layout",
 //! "Frame all" (both enabled only with an active doc), View > "Problems" (a check-marked toggle,
-//! always enabled) and Help > "Controls" (always enabled).
+//! always enabled) and Help > "Controls" / "About..." (always enabled).
 
 use aberredengine::prelude::imgui::Ui;
 use aberredengine::prelude::*;
@@ -88,6 +88,10 @@ pub fn draw(
     ui.menu("Help", || {
         if item(ui, "Controls", "", true) {
             actions.push(EditorAction::ShowControls);
+        }
+        ui.separator();
+        if item(ui, "About...", "", true) {
+            actions.push(EditorAction::ShowAbout);
         }
     });
 }

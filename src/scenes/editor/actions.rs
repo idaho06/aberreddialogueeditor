@@ -47,6 +47,9 @@ pub enum EditorAction {
     /// Help > "Controls": show the controls help modal (workspace-level, works with and without
     /// an active doc).
     ShowControls,
+    /// Help > "About...": show the about modal (workspace-level, works with and without an
+    /// active doc).
+    ShowAbout,
     /// Context menu "Add node here": append a node at the given world position and select it.
     /// No-op without an active doc.
     AddNodeAt(Vec2),
@@ -222,6 +225,9 @@ pub fn apply_action(
         }
         EditorAction::ShowControls => {
             ws.show_controls = true;
+        }
+        EditorAction::ShowAbout => {
+            ws.show_about = true;
         }
         EditorAction::AddNodeAt(world) => add_node_and_select(ws, world),
         EditorAction::AddNode { viewport } => {
@@ -723,6 +729,20 @@ mod tests {
         let fx = apply_action(&mut ws, EditorAction::ShowControls, None);
         assert!(fx.dialog.is_none() && !fx.quit);
         assert!(ws.show_controls, "still works with an active doc");
+    }
+
+    #[test]
+    fn show_about_sets_the_workspace_flag_with_and_without_a_doc() {
+        let mut ws = Workspace::default();
+        let fx = apply_action(&mut ws, EditorAction::ShowAbout, None);
+        assert!(fx.dialog.is_none() && !fx.quit);
+        assert!(ws.show_about, "workspace-level: works without a doc");
+
+        ws.show_about = false;
+        ops::open_path(&mut ws, &fixture("guard.json")).expect("opens");
+        let fx = apply_action(&mut ws, EditorAction::ShowAbout, None);
+        assert!(fx.dialog.is_none() && !fx.quit);
+        assert!(ws.show_about, "still works with an active doc");
     }
 
     #[test]

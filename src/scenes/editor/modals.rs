@@ -1,8 +1,9 @@
 //! Modal popups, opened from the frame's top-level scope after the menu scope: the notification
 //! modal (first entry of `ws.notifications` — title chosen by its [`NotificationKind`]),
 //! the "Unsaved changes" confirm for a pending tab close, the "Unsaved changes" confirm for a
-//! pending quit, and the Help > "Controls" modal (`ws.show_controls`). Only one shows at a
-//! time; priority is notification, close, quit, then Controls (lowest).
+//! pending quit, the Help > "Controls" modal (`ws.show_controls`) and the Help > "About..." modal
+//! (`ws.show_about`). Only one shows at a
+//! time; priority is notification, close, quit, then Controls, then About (lowest).
 //!
 //! Locking: the workspace is locked to snapshot the modal state, the guard is dropped while
 //! the widgets are drawn, and a button click is applied with a fresh short lock. The Save As
@@ -23,6 +24,7 @@ const SAVE_REJECTED_MODAL: &str = "Cannot save: the engine would reject this dia
 const CLOSE_MODAL: &str = "Unsaved changes##close";
 const QUIT_MODAL: &str = "Unsaved changes##quit";
 const CONTROLS_MODAL: &str = "Controls##help";
+const ABOUT_MODAL: &str = "About###about";
 
 /// The modal title/id for a notification of `kind`: a plain [`NotificationKind::Error`] keeps
 /// `"Error##modal"`; a [`NotificationKind::SaveRejected`] (the engine's save gate rejected the
@@ -70,6 +72,7 @@ enum ModalChoice {
     QuitDiscard,
     QuitCancel,
     ControlsOk,
+    AboutOk,
 }
 
 /// Snapshot of the modal-relevant workspace state.
@@ -83,6 +86,8 @@ struct ModalSnap {
     pending_quit: bool,
     /// Help > "Controls" requested; shown only when no other modal is showing.
     show_controls: bool,
+    /// Help > "About..." requested; shown only when no other modal is showing.
+    show_about: bool,
 }
 
 fn snapshot(app_state: &AppState) -> ModalSnap {
@@ -94,6 +99,7 @@ fn snapshot(app_state: &AppState) -> ModalSnap {
         }),
         pending_quit: ws.pending_quit,
         show_controls: ws.show_controls,
+        show_about: ws.show_about,
     })
     .unwrap_or_default()
 }
@@ -161,6 +167,20 @@ pub fn draw(ctx: &mut GuiCtx) -> bool {
             ui.columns(1, "controls_columns", false);
             ui.separator();
             choice_button(ui, "OK", &mut choice, ModalChoice::ControlsOk);
+        });
+    } else if snap.show_about {
+        with_modal(ui, ABOUT_MODAL, |ui| {
+            ui.text(format!(
+                "Aberred Dialogue Editor {}",
+                env!("CARGO_PKG_VERSION")
+            ));
+            ui.text("Node-graph editor for AberredEngine dialogue JSON.");
+            ui.text("By Idaho06 from AkinoSoft!");
+            ui.text("(c) 2026 - MIT License");
+            ui.text("https://github.com/idaho06/aberreddialogueeditor");
+            ui.text("Built on AberredEngine.");
+            ui.separator();
+            choice_button(ui, "OK", &mut choice, ModalChoice::AboutOk);
         });
     }
     apply_choice(ctx.app_state, choice)
@@ -262,6 +282,10 @@ fn apply_choice_ws(ws: &mut Workspace, choice: ModalChoice) -> ChoiceEffect {
         ModalChoice::ControlsOk => {
             ws.show_controls = false;
             log::debug!("modal {choice:?}: controls modal closed");
+        }
+        ModalChoice::AboutOk => {
+            ws.show_about = false;
+            log::debug!("modal {choice:?}: about modal closed");
         }
     }
     ChoiceEffect::Nothing
@@ -451,6 +475,18 @@ mod tests {
             ChoiceEffect::Nothing
         );
         assert!(!ws.show_controls, "OK clears the flag");
+    }
+
+    #[test]
+    fn about_ok_clears_the_show_about_flag() {
+        let mut ws = Workspace::default();
+        assert!(!ws.show_about, "default is false");
+        ws.show_about = true;
+        assert_eq!(
+            apply_choice_ws(&mut ws, ModalChoice::AboutOk),
+            ChoiceEffect::Nothing
+        );
+        assert!(!ws.show_about, "OK clears the flag");
     }
 
     #[test]

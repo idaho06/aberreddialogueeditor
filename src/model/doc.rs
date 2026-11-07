@@ -481,6 +481,8 @@ pub struct Workspace {
     pub pending_quit: bool,
     /// Set by Help > "Controls"; the GUI shows the controls modal while this is true.
     pub show_controls: bool,
+    /// Set by Help > "About..."; the GUI shows the about modal while this is true.
+    pub show_about: bool,
     /// Pending graph context-menu request (right-click without movement); the GUI consumes it.
     pub pending_context_menu: Option<ContextMenuRequest>,
 }
@@ -528,14 +530,15 @@ impl Workspace {
     }
 
     /// Whether any modal is currently open: a queued notification, the unsaved-changes close or quit
-    /// confirm, or Help > "Controls". The GUI gates keyboard-shortcut polling on this, because imgui
-    /// modals block mouse input to other windows but NOT io-level key polling (`ui.is_key_pressed`
-    /// still fires while a modal is open).
+    /// confirm, or a Help modal (Controls or About). The GUI gates keyboard-shortcut polling on this,
+    /// because imgui modals block mouse input to other windows but NOT io-level key polling
+    /// (`ui.is_key_pressed` still fires while a modal is open).
     pub fn has_modal(&self) -> bool {
         !self.notifications.is_empty()
             || self.pending_close.is_some()
             || self.pending_quit
             || self.show_controls
+            || self.show_about
     }
 
     /// Index of the first doc whose path equals `path`, if any.
@@ -1109,17 +1112,19 @@ mod tests {
     }
 
     #[test]
-    fn has_modal_is_true_exactly_when_a_notification_close_quit_or_controls_modal_is_open() {
-        // (notifications queued, pending_close, pending_quit, show_controls) -> expected has_modal
+    fn has_modal_is_true_exactly_when_a_notification_close_quit_controls_or_about_modal_is_open() {
+        // (notifications queued, pending_close, pending_quit, show_controls, show_about)
+        // -> expected has_modal
         let cases = [
-            (false, false, false, false, false),
-            (true, false, false, false, true),
-            (false, true, false, false, true),
-            (false, false, true, false, true),
-            (false, false, false, true, true),
-            (true, true, true, true, true),
+            (false, false, false, false, false, false),
+            (true, false, false, false, false, true),
+            (false, true, false, false, false, true),
+            (false, false, true, false, false, true),
+            (false, false, false, true, false, true),
+            (false, false, false, false, true, true),
+            (true, true, true, true, true, true),
         ];
-        for (notes, close, quit, controls, expected) in cases {
+        for (notes, close, quit, controls, about, expected) in cases {
             let mut ws = Workspace::default();
             if notes {
                 ws.notifications.push(Notification {
@@ -1132,10 +1137,12 @@ mod tests {
             }
             ws.pending_quit = quit;
             ws.show_controls = controls;
+            ws.show_about = about;
             assert_eq!(
                 ws.has_modal(),
                 expected,
-                "notifications={notes} pending_close={close} pending_quit={quit} show_controls={controls}"
+                "notifications={notes} pending_close={close} pending_quit={quit} \
+                 show_controls={controls} show_about={about}"
             );
         }
     }
