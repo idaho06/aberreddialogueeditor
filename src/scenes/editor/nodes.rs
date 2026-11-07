@@ -55,10 +55,11 @@ pub fn draw(ctx: &mut GuiCtx) {
                     ui.text_disabled("(no nodes)");
                 }
                 for (key, id) in &snap.nodes {
-                    // `##<key>` keeps the id unique in the window even when node ids duplicate.
-                    let label = format!("{id}##{}", key.0);
+                    // Each row gets its own id scope from the NodeKey, so the selectable's
+                    // label is the plain node id even when node ids duplicate.
+                    let _row = ui.push_id_usize(key.0 as usize);
                     if ui
-                        .selectable_config(label)
+                        .selectable_config(id)
                         .selected(snap.selected == Some(*key))
                         .build()
                     {

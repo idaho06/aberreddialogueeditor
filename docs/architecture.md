@@ -21,6 +21,8 @@ DialogueTree, DialogueError, Vec2}`.
 
 - `Workspace { docs: Vec<DialogueDoc>, active: usize, next_doc_id, notifications, problems_hidden,
   pending_close, pending_quit, show_controls, pending_context_menu }` — the single source of truth.
+  `pending_close` holds the pending close's `doc_id` (never a tab index), resolved with
+  `Workspace::position` at use, so tabs shifting while the modal is open cannot redirect it.
 - `DialogueDoc { doc_id, nodes: Vec<EdNode>, start: Option<NodeKey>, path, dirty, revision,
   content_revision, selected, camera: CamState, load_warnings, next_key, lint_cache }` — one tab.
   `EdNode { key: NodeKey, id, speaker, text, labels, on_enter, out: Outputs, pos: Vec2 }`;
@@ -69,7 +71,8 @@ Pure modules (no ECS/imgui; engine imports limited to `Vec2`/`Color`) are `style
 palette, Z indices), `geometry.rs` (`rows`/`node_height`/`node_rect`, `input_pin`/`output_pin`/`slot_at`,
 `hit_test` — pins beat bodies, later node in `doc.nodes` wins, `edge_curve` with control points relative to
 the source pin, `arrow_tip_dir`, `graph_bounds`), `wrap.rs` (char-safe greedy `wrap_text` with `"..."`
-truncation, `fit_line`), `camera.rs` (`screen_to_world`/`world_to_screen`, `zoom_at` clamped to [0.1, 4.0],
+truncation, `fit_line`), `camera.rs` (`screen_to_world` plus `#[cfg(test)]`-only `world_to_screen`,
+`zoom_at` clamped to [0.1, 4.0],
 `pan_by_screen_delta`, `center_on`, `frame_all` clamped to [0.1, 1.0]), `layout.rs` (`auto_layout`: BFS-depth
 layers from `start`, back edges ignored, unreachable nodes in trailing columns, barycenter ordering with two
 forward sweeps, columns at `layer * (NODE_W + COL_GAP)` centred on y = 0; writes via `set_node_pos`, so it
@@ -145,7 +148,9 @@ notification and no dialog is requested.
   `inspector::apply_edits(doc, &edits)`, **not** `apply_action` — because `apply_action` logs `{action:?}`,
   which would leak node text into the log. `apply_edits` logs only the edit kind and the node key, and edits
   are applied only if the active doc's `doc_id` still matches the snapshot's.
-- Windows: `nodes.rs` (Nodes list + load warnings), `inspector/` (Inspector: `mod.rs` window+Edit+apply_edits,
+- Windows: `nodes.rs` (Nodes list + load warnings; rows are `push_id_usize(key)` with the plain id as
+  the label), `inspector/` (Inspector: `mod.rs` window + snapshot/`doc_id` guard, `edit.rs` the pure
+  `Edit`/`OutputsMode`/`change_mode`/`apply_edits` core re-exported by `mod.rs`,
   `node_fields.rs`, `outputs.rs`, `expr.rs` recursive condition editor, `effects.rs` effects list editor,
   `widgets.rs` shared key/type-combo/Up-Down-Delete widgets),
   `problems.rs` (Problems window, errors first; row click -> `FocusNode`), `status.rs` (bottom status bar),
@@ -188,12 +193,12 @@ unsaved-changes modal's Save on an untitled doc).
 | `src/model/convert.rs` | `from_def` (tolerant) / `to_def` (total, exact) against the engine's `DialogueDef` — load/save only |
 | `src/model/lint.rs` | `Severity`/`ProblemKind`/`Problem`, `lint` (all problems, deterministic order), `engine_gate` (`DialogueTree::try_from(to_def(doc))`) |
 | `src/model/notify.rs` | `Notification`/`NotificationKind` (`Error`, `SaveRejected`) queue entries for the GUI modal |
-| `src/ops/mod.rs` | `open_path`/`check_saveable`/`save_doc`/`save_doc_at`/`new_doc`/`close_doc`/`doc_title`, `OpenOutcome`, `OpError`, `error_notification` |
+| `src/ops/mod.rs` | `open_path`/`check_saveable`/`save_doc`/`save_doc_at`/`new_doc`/`close_doc`/`doc_title`, `OpenOutcome`, `OpError`, `error_notification`, `notify` (push the typed notification + return its kind) |
 | `src/graph/mod.rs` | Graph module wiring, re-exports, `#[cfg(test)] fixtures` helper (fixture JSON + laid-out guard doc) |
 | `src/graph/style.rs` | Numeric constants (node/pin/row/gap sizes, edge/outline thickness, `FONT`), palette, Z indices |
 | `src/graph/geometry.rs` | `rows`/`node_height`/`node_rect`, `input_pin`/`output_pin`/`slot_at`, `hit_test`, `edge_curve`, `arrow_tip_dir`, `graph_bounds` |
 | `src/graph/wrap.rs` | Char-safe greedy `wrap_text` with `"..."` truncation + `fit_line` |
-| `src/graph/camera.rs` | `screen_to_world`/`world_to_screen`, `zoom_at` ([0.1, 4.0]), `pan_by_screen_delta`, `center_on`, `frame_all` ([0.1, 1.0]) |
+| `src/graph/camera.rs` | `screen_to_world` (+ `world_to_screen`, `#[cfg(test)]` only), `zoom_at` ([0.1, 4.0]), `pan_by_screen_delta`, `center_on`, `frame_all` ([0.1, 1.0]) |
 | `src/graph/layout.rs` | `auto_layout` — layered left-to-right layout, BFS from start, deterministic, view-only |
 | `src/graph/describe.rs` | `describe_node` -> `NodeVisual` (texts/pins local to the node top-left), `row_text`/`row_link` |
 | `src/graph/projection_plan.rs` | `Snapshot`/`NodeSig`/`EdgeView`/`ProjOp`, `snapshot_of`, `plan_projection`, `is_structural` (pure) |
@@ -213,7 +218,8 @@ unsaved-changes modal's Save on an untitled doc).
 | `src/scenes/editor/shortcuts.rs` | imgui key polling (`plain_shortcuts`, `ctrl_shortcuts`), gated on `!want_text_input` |
 | `src/scenes/editor/tabs.rs` | Tab strip (`###doc{doc_id}` ids, `LAST_ACTIVE`, `clicked_focus`/`resolve_focus` rules) |
 | `src/scenes/editor/nodes.rs` | Nodes window: load warnings + selectable node-id list |
-| `src/scenes/editor/inspector/mod.rs` | Inspector window, the `Edit` enum, pure `apply_edits`, `change_mode`, snapshot/`doc_id` guard |
+| `src/scenes/editor/inspector/mod.rs` | Inspector window (`Panel`/`NodeSnap`/`snapshot`/`draw`/`node_flags`); re-exports the pure edit core from `edit.rs` |
+| `src/scenes/editor/inspector/edit.rs` | The pure edit core: `Edit`, `OutputsMode`, `change_mode`, `apply_edits` (logs each edit once via `log_edit` — kind + node key + structural detail only) and their tests |
 | `src/scenes/editor/inspector/node_fields.rs` | Node field widgets (id/speaker/text/labels/start/on-enter), `NodeFlags`, `labels_editor` |
 | `src/scenes/editor/inspector/outputs.rs` | Outputs editor: Next/Choices radios, per-choice sections (`###choice{i}`), `combo_entries`, `target_combo`, `truncate_chars` |
 | `src/scenes/editor/inspector/expr.rs` | Recursive condition editor (`condition_editor`, `optional_condition_editor`), `CondKind`, pure `convert_condition` |
@@ -236,11 +242,12 @@ unsaved-changes modal's Save on an untitled doc).
   (no-ops without an active doc where applicable), a menu item in `menu.rs` (and/or a key in `shortcuts.rs`),
   plus a `#[cfg(test)]` test in `actions.rs`. Viewport-carrying actions (`FrameAll`, `Relayout`, `AddNode`) get
   the viewport from `ui.io().display_size` at the producer (`display_viewport` in `scenes/editor/mod.rs`).
-- **An Inspector field / `Edit` variant:** add the variant to `Edit` in `inspector/mod.rs`, an arm in the pure
-  `apply_edits` (through the existing doc mutators; log only the kind + node key — `trace!` for per-keystroke
-  kinds, `debug!` for structural ones), a widget in `node_fields.rs`/`outputs.rs` that pushes the edit only when
-  the widget reports a change, and tests for `apply_edits`. Widget ids come from the `NodeKey`/indices, never
-  from the edited text (the panel body is wrapped in `push_id(node{key})`).
+- **An Inspector field / `Edit` variant:** add the variant to `Edit` in `inspector/edit.rs`, an arm in the pure
+  `apply_edits` (through the existing doc mutators) and in `Edit::log_kind` (which classifies it for logging —
+  the match is exhaustive, so a new variant cannot skip the rule; log only the kind + node key + structural
+  detail — `trace!` for per-keystroke kinds, `debug!` for structural ones), a widget in `node_fields.rs`/`outputs.rs`
+  that pushes the edit only when the widget reports a change, and tests for `apply_edits`. Widget ids come from
+  the `NodeKey`/indices, never from the edited text (the panel body is wrapped in `push_id(node{key})`).
 - **A new condition or effect kind** (when the engine enums gain one): extend `CondKind` (`of`/`name`/`KINDS`)
   and the pure `convert_condition` in `inspector/expr.rs`, plus the per-kind arm in `condition_editor`;
   extend `EffectKind` + `convert_effect` + the value-widget arm in `inspector/effects.rs`. Keep the serde-shape

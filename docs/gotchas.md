@@ -52,7 +52,8 @@ against this repo's `src/`.
   ids are `###doc{doc_id}` (`actions::tab_label` — everything before `###` is display-only); choice headers
   are `"Choice N: <truncated>###choice{i}"`; section headers use fixed `###` suffixes (`###effects`,
   `###onenter`, `###loadwarn`, `###row`); list rows and recursion levels are wrapped in `push_id_usize(..)`;
-  the Inspector body is wrapped in `push_id(node{key})`; Nodes rows use `{id}##{key}`. Typing must never change
+  the Inspector body is wrapped in `push_id(node{key})`; Nodes rows are wrapped in `push_id_usize(key)` with
+  the plain node id as the selectable label. Typing must never change
   a widget id or the input loses focus / the section collapses.
 - **imgui's `p_open` does not hide a window.** `Begin(name, &mut open)` only shows the close button and writes
   `false` into it on click; a window whose flag is already false is still built. Rule: a hidden window is not

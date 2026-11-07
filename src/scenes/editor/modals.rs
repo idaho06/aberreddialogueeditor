@@ -77,7 +77,8 @@ enum ModalChoice {
 struct ModalSnap {
     /// First queued notification, if any.
     error: Option<Notification>,
-    /// Pending close: tab index plus its title for the message.
+    /// Pending close, resolved from its `doc_id` to `(tab index, title)` for the message. A doc
+    /// that is no longer open resolves to `None`: no close modal is shown.
     pending_close: Option<(usize, String)>,
     pending_quit: bool,
     /// Help > "Controls" requested; shown only when no other modal is showing.
@@ -87,10 +88,10 @@ struct ModalSnap {
 fn snapshot(app_state: &AppState) -> ModalSnap {
     with_workspace(app_state, |ws| ModalSnap {
         error: ws.notifications.first().cloned(),
-        pending_close: ws
-            .pending_close
-            .filter(|index| *index < ws.docs.len())
-            .map(|index| (index, ops::doc_title(&ws.docs[index]))),
+        pending_close: ws.pending_close.and_then(|doc_id| {
+            ws.position(doc_id)
+                .map(|index| (index, ops::doc_title(&ws.docs[index])))
+        }),
         pending_quit: ws.pending_quit,
         show_controls: ws.show_controls,
     })
@@ -191,9 +192,12 @@ fn apply_choice_ws(ws: &mut Workspace, choice: ModalChoice) -> ChoiceEffect {
             }
         }
         ModalChoice::CloseSave => {
-            let Some(index) = ws.pending_close.filter(|index| *index < ws.docs.len()) else {
+            // Resolve the pending close's doc_id to its CURRENT tab index; a doc that is no
+            // longer open means no modal target — clear the stale value like an out-of-range
+            // index used to.
+            let Some(index) = ws.pending_close.and_then(|doc_id| ws.position(doc_id)) else {
                 ws.pending_close = None;
-                log::debug!("modal {choice:?}: pending close index out of range, cleared");
+                log::debug!("modal {choice:?}: pending close doc is no longer open, cleared");
                 return ChoiceEffect::Nothing;
             };
             match ws.docs[index].path.clone() {
@@ -206,7 +210,7 @@ fn apply_choice_ws(ws: &mut Workspace, choice: ModalChoice) -> ChoiceEffect {
                     Err(err) => {
                         // A failure pushes a notification (shown by the error modal first) and
                         // keeps both the tab and the pending close.
-                        ws.notifications.push(ops::error_notification(&err));
+                        ops::notify(ws, &err);
                         log::debug!(
                             "modal {choice:?}: save of tab {index} failed, error modal queued"
                         );
@@ -225,7 +229,7 @@ fn apply_choice_ws(ws: &mut Workspace, choice: ModalChoice) -> ChoiceEffect {
                         log::debug!(
                             "modal {choice:?}: save pre-check rejected the untitled doc, no dialog"
                         );
-                        ws.notifications.push(ops::error_notification(&err));
+                        ops::notify(ws, &err);
                         return ChoiceEffect::Nothing;
                     }
                     log::debug!(
@@ -236,9 +240,7 @@ fn apply_choice_ws(ws: &mut Workspace, choice: ModalChoice) -> ChoiceEffect {
             }
         }
         ModalChoice::CloseDiscard => {
-            if let Some(index) = ws.pending_close
-                && index < ws.docs.len()
-            {
+            if let Some(index) = ws.pending_close.and_then(|doc_id| ws.position(doc_id)) {
                 ops::close_doc(ws, index);
                 log::debug!("modal {choice:?}: discarded changes and closed tab {index}");
             }
@@ -304,7 +306,7 @@ mod tests {
     #[test]
     fn close_save_on_an_untitled_invalid_doc_returns_nothing_and_queues_save_rejected() {
         let mut ws = ws_with_duplicate_id_doc();
-        ws.pending_close = Some(0);
+        ws.pending_close = Some(ws.docs[0].doc_id);
         assert_eq!(
             apply_choice_ws(&mut ws, ModalChoice::CloseSave),
             ChoiceEffect::Nothing,
@@ -328,7 +330,7 @@ mod tests {
         ops::new_doc(&mut ws);
         ws.active_doc_mut().unwrap().add_node(Vec2::ZERO); // one node = start: valid
         let doc_id = ws.docs[0].doc_id;
-        ws.pending_close = Some(0);
+        ws.pending_close = Some(doc_id);
         assert_eq!(
             apply_choice_ws(&mut ws, ModalChoice::CloseSave),
             ChoiceEffect::SaveAsDialog { doc_id }
@@ -350,7 +352,7 @@ mod tests {
         ws.active_doc_mut().unwrap().add_node(Vec2::ZERO); // dirty
         let out = tmp.join("out.json");
         ws.active_doc_mut().unwrap().path = Some(out.clone());
-        ws.pending_close = Some(0);
+        ws.pending_close = Some(ws.docs[0].doc_id);
         assert_eq!(
             apply_choice_ws(&mut ws, ModalChoice::CloseSave),
             ChoiceEffect::Nothing
@@ -364,26 +366,28 @@ mod tests {
     #[test]
     fn close_discard_after_another_tab_was_closed_discards_the_original_pending_tab() {
         // The data-loss scenario: tabs [B clean(0), A dirty(1), C dirty(2)]; X on A sets
-        // pending_close = Some(1) and opens the modal; a shortcut (Ctrl+W) closes B while the
+        // pending_close = A's doc_id and opens the modal; a shortcut (Ctrl+W) closes B while the
         // modal is open; "Discard" must close A — the tab the user confirmed — not C, which now
-        // sits at index 1.
+        // sits at index 0.
         let mut ws = Workspace::default();
         ops::new_doc(&mut ws); // B, index 0, clean
         ws.docs[0].path = Some(std::path::PathBuf::from("/tmp/b.json"));
         ops::new_doc(&mut ws); // A, index 1
         ws.docs[1].path = Some(std::path::PathBuf::from("/tmp/a.json"));
         ws.active_doc_mut().unwrap().add_node(Vec2::ZERO); // A dirty
+        let a_id = ws.docs[1].doc_id;
         ops::new_doc(&mut ws); // C, index 2
         ws.docs[2].path = Some(std::path::PathBuf::from("/tmp/c.json"));
         ws.active_doc_mut().unwrap().add_node(Vec2::ZERO); // C dirty
 
-        ws.pending_close = Some(1); // X clicked on A
+        ws.pending_close = Some(a_id); // X clicked on A
         ops::close_doc(&mut ws, 0); // Ctrl+W closed B while the modal was open
         assert_eq!(
             ws.pending_close,
-            Some(0),
-            "closing B shifts the pending close from A(1) to A(0)"
+            Some(a_id),
+            "pending_close holds A's doc_id: closing B does not change it"
         );
+        assert_eq!(ws.position(a_id), Some(0), "A shifted to index 0");
         assert_eq!(ws.docs.len(), 2);
 
         assert_eq!(

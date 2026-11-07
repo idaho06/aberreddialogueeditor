@@ -78,7 +78,8 @@ Full detail in `docs/gotchas.md`. The rules that prevent bugs:
 - `Workspace` is the single source of truth (`docs/architecture.md` has the full shape) and also carries the
   typed modal queue `notifications: Vec<Notification>` (`Notification`/`NotificationKind` in
   `src/model/notify.rs`), `problems_hidden` (the INVERSE visibility flag of the Problems window — the derived
-  `Default` = visible), `pending_close`/`pending_quit`/`show_controls`/`pending_context_menu`.
+  `Default` = visible), `pending_close` (the pending close's `doc_id`, never a tab index — resolved with
+  `Workspace::position` at use), `pending_quit`/`show_controls`/`pending_context_menu`.
 - Every mutation on `DialogueDoc` goes through a named mutator; there is no public `&mut EdNode` accessor.
   Every mutator bumps `revision`; content mutators also bump `content_revision` and set `dirty`;
   `set_node_pos`, `select` and `mark_clean` only bump `revision` (view-only, never saved); `set_camera` bumps
@@ -115,7 +116,7 @@ Full detail in `docs/gotchas.md`. The rules that prevent bugs:
 - **Pure modules:** `style.rs` (numeric constants, palette, Z indices), `geometry.rs` (`rows`/`node_height`/
   `node_rect`, pins, `slot_at`, `hit_test` — pins beat bodies, later node in `doc.nodes` wins, `edge_curve`
   control points RELATIVE to the source pin, `arrow_tip_dir`, `graph_bounds`), `wrap.rs` (char-safe
-  `wrap_text` with `"..."` truncation, `fit_line`), `camera.rs` (`screen_to_world`/`world_to_screen`,
+  `wrap_text` with `"..."` truncation, `fit_line`), `camera.rs` (`screen_to_world` plus `#[cfg(test)]`-only `world_to_screen`,
   `zoom_at` clamp [0.1, 4.0], `pan_by_screen_delta`, `center_on`, `frame_all` clamp [0.1, 1.0], `None` ->
   ZERO/1.0), `layout.rs` (`auto_layout`: BFS-depth layers from start, back edges ignored, unreachable nodes in
   trailing columns, barycenter ordering, columns at `layer * (NODE_W + COL_GAP)` centred on y = 0; writes via
@@ -189,13 +190,15 @@ Full detail in `docs/gotchas.md`. The rules that prevent bugs:
 ## Inspector
 
 - `inspector/mod.rs` draws the "Inspector" window (plain imgui window, first-use position top-right) showing the
-  SELECTED node of the ACTIVE doc ("Nothing selected"/"No document" otherwise). It holds the `Edit` enum and the
-  PURE `apply_edits(doc, &edits)`, which applies edits in order through the doc mutators (a vanished NodeKey /
+  SELECTED node of the ACTIVE doc ("Nothing selected"/"No document" otherwise). The PURE edit core — the `Edit`
+  enum, `OutputsMode`, `change_mode` and `apply_edits(doc, &edits)` — lives in `inspector/edit.rs` and is
+  re-exported by `mod.rs`; `apply_edits` applies edits in order through the doc mutators (a vanished NodeKey /
   out-of-range index is ignored: no panic, no bump).
 - Inspector edits are applied by `apply_edits`, NOT through `apply_action` — `apply_action` logs `{action:?}`,
-  which would leak node text. `apply_edits` logs only the edit KIND and the node key (`trace!` per-keystroke
-  kinds, `debug!` structural), and the GUI applies collected edits only if the active doc's `doc_id` still
-  matches the snapshot's.
+  which would leak node text. `apply_edits` logs each edit once via `log_edit` BEFORE the match — only the edit
+  KIND and the node key (plus the structural detail: mode/slot/index/delta; `trace!` per-keystroke kinds,
+  `debug!` structural; `Edit::log_kind`'s exhaustive match classifies every variant), and the GUI applies
+  collected edits only if the active doc's `doc_id` still matches the snapshot's.
 - Per frame: lock briefly to snapshot the selected node (clone) + flags + `doc_id` + targets, unlock; draw
   widgets with the guard dropped, emitting an edit only when a widget reports a change; re-lock to apply. The
   lock is never held across widget calls.

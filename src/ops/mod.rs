@@ -220,6 +220,16 @@ pub fn error_notification(err: &OpError) -> Notification {
     }
 }
 
+/// Pushes the typed notification for a failed operation (`error_notification(err)`) onto
+/// `ws.notifications` and returns its kind, so callers can still log the KIND only — a
+/// SaveRejected message quotes node ids (document content) and must not reach the log.
+pub fn notify(ws: &mut Workspace, err: &OpError) -> NotificationKind {
+    let note = error_notification(err);
+    let kind = note.kind;
+    ws.notifications.push(note);
+    kind
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -668,6 +678,40 @@ mod tests {
         ];
         for (err, expected_kind) in cases {
             let note = error_notification(&err);
+            assert_eq!(note.kind, expected_kind, "{err}");
+            match &err {
+                OpError::Invalid(msg) => assert_eq!(&note.message, msg),
+                _ => assert_eq!(note.message, err.to_string()),
+            }
+        }
+    }
+
+    #[test]
+    fn notify_pushes_exactly_one_notification_with_the_right_kind_and_message_for_each_variant() {
+        let cases: [(OpError, NotificationKind); 4] = [
+            (
+                OpError::Io("cannot read x.json: nope".to_owned()),
+                NotificationKind::Error,
+            ),
+            (
+                OpError::Json("cannot parse y.json: bad".to_owned()),
+                NotificationKind::Error,
+            ),
+            (
+                OpError::Invalid("engine says no".to_owned()),
+                NotificationKind::SaveRejected,
+            ),
+            (
+                OpError::AlreadyOpen("/tmp/z.json".to_owned()),
+                NotificationKind::Error,
+            ),
+        ];
+        for (err, expected_kind) in cases {
+            let mut ws = Workspace::default();
+            let kind = notify(&mut ws, &err);
+            assert_eq!(kind, expected_kind, "the returned kind: {err}");
+            assert_eq!(ws.notifications.len(), 1, "exactly one notification pushed");
+            let note = &ws.notifications[0];
             assert_eq!(note.kind, expected_kind, "{err}");
             match &err {
                 OpError::Invalid(msg) => assert_eq!(&note.message, msg),

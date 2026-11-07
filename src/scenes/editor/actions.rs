@@ -139,7 +139,7 @@ fn save_active(ws: &mut Workspace, fx: &mut ActionEffects, app_state: Option<&Ap
         Some(path) => {
             let result = ws.active_doc_mut().map(|doc| ops::save_doc(doc, &path));
             if let Some(Err(err)) = result {
-                ws.notifications.push(ops::error_notification(&err));
+                ops::notify(ws, &err);
             }
         }
         None => {
@@ -168,16 +168,18 @@ fn close_tab(ws: &mut Workspace, index: usize, app_state: Option<&AppState>) -> 
         );
         return false;
     }
-    let Some(dirty) = ws.docs.get(index).map(|doc| doc.dirty) else {
+    let Some(doc) = ws.docs.get(index) else {
         log::debug!(
             "action {action:?} ignored: no doc at index {index} (docs={})",
             ws.docs.len()
         );
         return false;
     };
-    match close_decision(dirty) {
+    match close_decision(doc.dirty) {
         CloseDecision::CloseNow => ops::close_doc(ws, index),
-        CloseDecision::Confirm => ws.pending_close = Some(index),
+        // Keyed by the doc's unique, never-reused doc_id (not its tab index), so tabs shifting
+        // while the confirm modal is open cannot redirect the close to the wrong tab.
+        CloseDecision::Confirm => ws.pending_close = Some(doc.doc_id),
     }
     true
 }
@@ -307,7 +309,7 @@ fn request_save_as(
         log::debug!(
             "action {action:?}: save pre-check rejected the active doc, no dialog requested"
         );
-        ws.notifications.push(ops::error_notification(&err));
+        ops::notify(ws, &err);
         return;
     }
     let doc_id = doc.doc_id;
@@ -606,7 +608,11 @@ mod tests {
 
         apply_action(&mut ws, EditorAction::CloseTab(0), None);
         assert_eq!(ws.docs.len(), 1, "the dirty tab stays open");
-        assert_eq!(ws.pending_close, Some(0), "the confirm modal is requested");
+        assert_eq!(
+            ws.pending_close,
+            Some(ws.docs[0].doc_id),
+            "the confirm modal is requested for the dirty doc's doc_id"
+        );
     }
 
     #[test]

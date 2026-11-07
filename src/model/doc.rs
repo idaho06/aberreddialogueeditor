@@ -209,101 +209,80 @@ impl DialogueDoc {
 
     /// Renames the node. No uniqueness check here — the linter reports duplicate ids.
     pub fn rename_node(&mut self, key: NodeKey, id: String) {
-        match self.nodes.iter_mut().find(|n| n.key == key) {
-            Some(node) => node.id = id,
-            None => return,
-        }
-        self.bump();
+        self.edit_node(key, |node| node.id = id);
     }
 
     /// Moves the node on the canvas. Bumps `revision` but NOT `dirty` or `content_revision`
     /// (positions are never saved and never affect lint).
     pub fn set_node_pos(&mut self, key: NodeKey, pos: Vec2) {
-        match self.nodes.iter_mut().find(|n| n.key == key) {
-            Some(node) => node.pos = pos,
-            None => return,
-        }
+        let Some(node) = self.node_mut(key) else {
+            return;
+        };
+        node.pos = pos;
         self.bump_view();
     }
 
     pub fn set_text(&mut self, key: NodeKey, text: String) {
-        match self.nodes.iter_mut().find(|n| n.key == key) {
-            Some(node) => node.text = text,
-            None => return,
-        }
-        self.bump();
+        self.edit_node(key, |node| node.text = text);
     }
 
     pub fn set_speaker(&mut self, key: NodeKey, speaker: Option<String>) {
-        match self.nodes.iter_mut().find(|n| n.key == key) {
-            Some(node) => node.speaker = speaker,
-            None => return,
-        }
-        self.bump();
+        self.edit_node(key, |node| node.speaker = speaker);
     }
 
     pub fn set_labels(&mut self, key: NodeKey, labels: Vec<String>) {
-        match self.nodes.iter_mut().find(|n| n.key == key) {
-            Some(node) => node.labels = labels,
-            None => return,
-        }
-        self.bump();
+        self.edit_node(key, |node| node.labels = labels);
     }
 
     pub fn set_on_enter(&mut self, key: NodeKey, on_enter: Vec<DialogueEffect>) {
-        match self.nodes.iter_mut().find(|n| n.key == key) {
-            Some(node) => node.on_enter = on_enter,
-            None => return,
-        }
-        self.bump();
+        self.edit_node(key, |node| node.on_enter = on_enter);
     }
 
     pub fn set_outputs(&mut self, key: NodeKey, out: Outputs) {
-        match self.nodes.iter_mut().find(|n| n.key == key) {
-            Some(node) => node.out = out,
-            None => return,
-        }
-        self.bump();
+        self.edit_node(key, |node| node.out = out);
     }
 
     /// Rewrites one output slot: `Slot::Next` on a `Next` node, `Slot::Choice(i)` on a choices node.
+    /// A slot that does not apply (mismatched mode, out-of-range index) is a no-op without a bump.
     pub fn set_link(&mut self, key: NodeKey, slot: Slot, link: Link) {
-        let node = match self.nodes.iter_mut().find(|n| n.key == key) {
-            Some(node) => node,
-            None => return,
+        let Some(node) = self.node_mut(key) else {
+            return;
         };
-        match (&mut node.out, slot) {
-            (Outputs::Next(l), Slot::Next) => *l = link,
+        let applied = match (&mut node.out, slot) {
+            (Outputs::Next(l), Slot::Next) => {
+                *l = link;
+                true
+            }
             (Outputs::Choices(v), Slot::Choice(i)) => match v.get_mut(i) {
-                Some(choice) => choice.target = link,
-                None => return,
+                Some(choice) => {
+                    choice.target = link;
+                    true
+                }
+                None => false,
             },
-            _ => return,
+            _ => false,
+        };
+        if applied {
+            self.bump();
         }
-        self.bump();
     }
 
-    /// Adds a choice: converts a `Next` node to `Choices` with one empty choice, appends an empty
-    /// choice to a choices node.
+    /// Adds a choice: converts a `Next` node to `Choices` with one empty choice (the next link is
+    /// dropped), appends an empty choice to a choices node.
     pub fn add_choice(&mut self, key: NodeKey) {
-        match self.nodes.iter_mut().find(|n| n.key == key) {
-            Some(node) => {
-                if matches!(&node.out, Outputs::Next(_)) {
-                    node.out = Outputs::Choices(vec![EdChoice::empty()]);
-                } else if let Outputs::Choices(v) = &mut node.out {
-                    v.push(EdChoice::empty());
-                }
+        self.edit_node(key, |node| {
+            if matches!(&node.out, Outputs::Next(_)) {
+                node.out = Outputs::Choices(vec![EdChoice::empty()]);
+            } else if let Outputs::Choices(v) = &mut node.out {
+                v.push(EdChoice::empty());
             }
-            None => return,
-        }
-        self.bump();
+        });
     }
 
     /// Deletes choice `index`; deleting the last choice converts the node to `Outputs::Next(Link::End)`.
     pub fn delete_choice(&mut self, key: NodeKey, index: usize) {
-        let node = match self.nodes.iter_mut().find(|n| n.key == key) {
-            Some(node) => node,
-            None => return,
+        let Some(node) = self.node_mut(key) else {
+            return;
         };
         let became_empty = match &mut node.out {
             Outputs::Choices(v) if index < v.len() => {
@@ -320,53 +299,37 @@ impl DialogueDoc {
 
     /// Moves choice `index` by `delta` positions, clamped to the list (no movement past either end).
     pub fn move_choice(&mut self, key: NodeKey, index: usize, delta: i32) {
-        match self.nodes.iter_mut().find(|n| n.key == key) {
-            Some(node) => match &mut node.out {
-                Outputs::Choices(v) if index < v.len() => {
-                    let last = (v.len() - 1) as i64;
-                    let new = (index as i64 + delta as i64).clamp(0, last) as usize;
-                    if new != index {
-                        let choice = v.remove(index);
-                        v.insert(new, choice);
-                    }
+        let Some(node) = self.node_mut(key) else {
+            return;
+        };
+        match &mut node.out {
+            Outputs::Choices(v) if index < v.len() => {
+                let last = (v.len() - 1) as i64;
+                let new = (index as i64 + delta as i64).clamp(0, last) as usize;
+                if new != index {
+                    let choice = v.remove(index);
+                    v.insert(new, choice);
                 }
-                _ => return,
-            },
-            None => return,
+            }
+            _ => return,
         }
         self.bump();
     }
 
     pub fn set_choice_text(&mut self, key: NodeKey, index: usize, text: String) {
-        match self.choice_mut(key, index) {
-            Some(choice) => choice.text = text,
-            None => return,
-        }
-        self.bump();
+        self.edit_choice(key, index, |choice| choice.text = text);
     }
 
     pub fn set_choice_when(&mut self, key: NodeKey, index: usize, when: Option<DialogueCondition>) {
-        match self.choice_mut(key, index) {
-            Some(choice) => choice.when = when,
-            None => return,
-        }
-        self.bump();
+        self.edit_choice(key, index, |choice| choice.when = when);
     }
 
     pub fn set_choice_effects(&mut self, key: NodeKey, index: usize, effects: Vec<DialogueEffect>) {
-        match self.choice_mut(key, index) {
-            Some(choice) => choice.effects = effects,
-            None => return,
-        }
-        self.bump();
+        self.edit_choice(key, index, |choice| choice.effects = effects);
     }
 
     pub fn set_choice_labels(&mut self, key: NodeKey, index: usize, labels: Vec<String>) {
-        match self.choice_mut(key, index) {
-            Some(choice) => choice.labels = labels,
-            None => return,
-        }
-        self.bump();
+        self.edit_choice(key, index, |choice| choice.labels = labels);
     }
 
     /// Selects a node (or clears the selection). Bumps `revision` but NOT `dirty` or
@@ -416,12 +379,40 @@ impl DialogueDoc {
             .map_or(&[], |(_, problems)| problems.as_slice())
     }
 
+    /// Mutable node lookup (private: there is no public `&mut EdNode` accessor — every change
+    /// goes through a named mutator so the bump bookkeeping stays in one place).
+    fn node_mut(&mut self, key: NodeKey) -> Option<&mut EdNode> {
+        self.nodes.iter_mut().find(|n| n.key == key)
+    }
+
     fn choice_mut(&mut self, key: NodeKey, index: usize) -> Option<&mut EdChoice> {
-        let node = self.nodes.iter_mut().find(|n| n.key == key)?;
+        let node = self.node_mut(key)?;
         match &mut node.out {
             Outputs::Choices(v) => v.get_mut(index),
             Outputs::Next(_) => None,
         }
+    }
+
+    /// Runs `f` on the node `key`, then bumps as a CONTENT change (`bump`). Returns `false` and
+    /// bumps nothing for an unknown key.
+    fn edit_node(&mut self, key: NodeKey, f: impl FnOnce(&mut EdNode)) -> bool {
+        let Some(node) = self.node_mut(key) else {
+            return false;
+        };
+        f(node);
+        self.bump();
+        true
+    }
+
+    /// Twin of [`Self::edit_node`] for choice `index` of `key`: runs `f` on the choice, then the
+    /// content `bump`. A `Next` node or an out-of-range index returns `false` and bumps nothing.
+    fn edit_choice(&mut self, key: NodeKey, index: usize, f: impl FnOnce(&mut EdChoice)) -> bool {
+        let Some(choice) = self.choice_mut(key, index) else {
+            return false;
+        };
+        f(choice);
+        self.bump();
+        true
     }
 
     /// Content change: `revision += 1`, `content_revision += 1`, `dirty = true`.
@@ -481,9 +472,11 @@ pub struct Workspace {
     /// derived `Default` (false) means "show the panel". Flipped by `EditorAction::ToggleProblems`
     /// (View > "Problems", Ctrl+Shift+P, the window's close button).
     pub problems_hidden: bool,
-    /// Tab index whose close was requested while the doc is dirty; the GUI shows a confirm modal
-    /// and either closes the tab or clears this.
-    pub pending_close: Option<usize>,
+    /// Doc id whose close was requested while the doc is dirty; the GUI shows a confirm modal
+    /// and either closes that tab or clears this. Keyed by the unique, never-reused `doc_id`
+    /// (NOT a tab index — resolved with [`Workspace::position`] at use), so tabs shifting while
+    /// the modal is open cannot redirect the confirm to the wrong tab.
+    pub pending_close: Option<u64>,
     /// Set when quit was requested while any doc is dirty; the GUI shows a confirm modal.
     pub pending_quit: bool,
     /// Set by Help > "Controls"; the GUI shows the controls modal while this is true.
@@ -510,14 +503,13 @@ impl Workspace {
     }
 
     /// Removes the doc at `index`, keeping `active` valid (and pointing at the same doc when possible).
-    /// `pending_close` is a TAB INDEX, so it shifts with the tabs: closing the pending tab clears it,
-    /// closing a tab before it decrements it, closing one after it leaves it alone. Without this, a
-    /// close issued while the unsaved-changes modal is open would make the modal confirm the WRONG
-    /// tab (and discard its changes).
+    /// `pending_close` holds a `doc_id`, so it needs no index arithmetic here: it is cleared exactly
+    /// when the closed doc IS the pending one. Without that, a close issued while the unsaved-changes
+    /// modal is open would make the modal confirm the WRONG tab (and discard its changes).
     pub fn close_doc(&mut self, index: usize) {
-        if index >= self.docs.len() {
+        let Some(closed_id) = self.docs.get(index).map(|doc| doc.doc_id) else {
             return;
-        }
+        };
         self.docs.remove(index);
         if self.active > index {
             self.active -= 1;
@@ -525,13 +517,14 @@ impl Workspace {
         if self.active >= self.docs.len() {
             self.active = self.docs.len().saturating_sub(1);
         }
-        if let Some(pending) = self.pending_close {
-            self.pending_close = match pending.cmp(&index) {
-                std::cmp::Ordering::Equal => None,
-                std::cmp::Ordering::Greater => Some(pending - 1),
-                std::cmp::Ordering::Less => Some(pending),
-            };
+        if self.pending_close == Some(closed_id) {
+            self.pending_close = None;
         }
+    }
+
+    /// Index of the still-open doc with `doc_id`, if any.
+    pub fn position(&self, doc_id: u64) -> Option<usize> {
+        self.docs.iter().position(|doc| doc.doc_id == doc_id)
     }
 
     /// Whether any modal is currently open: a queued notification, the unsaved-changes close or quit
@@ -1035,45 +1028,86 @@ mod tests {
     }
 
     #[test]
-    fn close_doc_keeps_pending_close_consistent_with_the_shifting_tab_indices() {
-        // Closing a tab BEFORE the pending one shifts the pending index down with it.
+    fn close_doc_leaves_pending_close_pointing_at_the_same_doc_when_another_tab_closes() {
+        // Closing a tab BEFORE the pending one leaves the pending doc id alone (it just shifts index).
         let mut ws = ws_three_docs();
-        ws.pending_close = Some(2);
+        let pending_id = ws.docs[2].doc_id;
+        ws.pending_close = Some(pending_id);
         ws.close_doc(0);
-        assert_eq!(ws.pending_close, Some(1), "pending shifts down by one");
-
-        // Closing AT the pending index clears it (the modal's tab is gone).
-        let mut ws = ws_three_docs();
-        ws.pending_close = Some(1);
-        ws.close_doc(1);
-        assert_eq!(ws.pending_close, None, "closing the pending tab clears it");
-
-        // Closing AFTER the pending one leaves the index alone.
-        let mut ws = ws_three_docs();
-        ws.pending_close = Some(0);
-        ws.close_doc(2);
         assert_eq!(
             ws.pending_close,
-            Some(0),
-            "pending before the closed tab is untouched"
+            Some(pending_id),
+            "pending_close is a doc id: closing another tab does not change it"
         );
+        assert_eq!(
+            ws.position(pending_id),
+            Some(1),
+            "the pending doc shifted to index 1"
+        );
+
+        // Closing a tab AFTER the pending one leaves it alone too.
+        let mut ws = ws_three_docs();
+        let pending_id = ws.docs[0].doc_id;
+        ws.pending_close = Some(pending_id);
+        ws.close_doc(2);
+        assert_eq!(ws.pending_close, Some(pending_id));
+        assert_eq!(ws.position(pending_id), Some(0));
+    }
+
+    #[test]
+    fn close_doc_of_the_pending_doc_clears_pending_close() {
+        let mut ws = ws_three_docs();
+        let pending_id = ws.docs[1].doc_id;
+        ws.pending_close = Some(pending_id);
+        ws.close_doc(1);
+        assert_eq!(ws.pending_close, None, "closing the pending doc clears it");
+
+        // Same after a shift: close an earlier tab first, then the (now shifted) pending doc.
+        let mut ws = ws_three_docs();
+        let pending_id = ws.docs[2].doc_id;
+        ws.pending_close = Some(pending_id);
+        ws.close_doc(0);
+        assert_eq!(
+            ws.pending_close,
+            Some(pending_id),
+            "still pending after the shift"
+        );
+        ws.close_doc(1); // the pending doc, now at index 1
+        assert_eq!(ws.pending_close, None, "closing the pending doc clears it");
+    }
+
+    #[test]
+    fn close_doc_out_of_range_changes_nothing_about_pending_close() {
+        let mut ws = ws_three_docs();
+        let pending_id = ws.docs[1].doc_id;
+        ws.pending_close = Some(pending_id);
+        ws.close_doc(7);
+        assert_eq!(
+            ws.pending_close,
+            Some(pending_id),
+            "out-of-range close changes nothing"
+        );
+        assert_eq!(ws.docs.len(), 3);
 
         // No pending close: stays None.
         let mut ws = ws_three_docs();
         assert_eq!(ws.pending_close, None);
         ws.close_doc(1);
         assert_eq!(ws.pending_close, None);
+    }
 
-        // Out of range: a no-op, pending_close untouched.
+    #[test]
+    fn position_resolves_a_doc_id_to_its_current_index_and_none_when_closed() {
         let mut ws = ws_three_docs();
-        ws.pending_close = Some(1);
-        ws.close_doc(7);
-        assert_eq!(
-            ws.pending_close,
-            Some(1),
-            "out-of-range close changes nothing"
-        );
-        assert_eq!(ws.docs.len(), 3);
+        let ids: Vec<u64> = ws.docs.iter().map(|d| d.doc_id).collect();
+        assert_eq!(ws.position(ids[0]), Some(0));
+        assert_eq!(ws.position(ids[1]), Some(1));
+        assert_eq!(ws.position(ids[2]), Some(2));
+        assert_eq!(ws.position(999), None, "an unknown id has no position");
+        ws.close_doc(0);
+        assert_eq!(ws.position(ids[0]), None, "a closed doc has no position");
+        assert_eq!(ws.position(ids[1]), Some(0), "the others shifted down");
+        assert_eq!(ws.position(ids[2]), Some(1));
     }
 
     #[test]

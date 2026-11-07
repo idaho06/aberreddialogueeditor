@@ -16,7 +16,7 @@ use crossbeam_channel::{Receiver, TryRecvError, unbounded};
 use futures::FutureExt;
 use rfd::AsyncFileDialog;
 
-use crate::model::{Notification, NotificationKind, Workspace};
+use crate::model::Workspace;
 use crate::ops;
 use crate::state::with_workspace;
 
@@ -163,10 +163,7 @@ pub fn apply_result(ws: &mut Workspace, result: AsyncFileDialogResult) {
             // Load warnings are shown in the Nodes panel, not as notifications: ignore them.
             if let Err(err) = ops::open_path(ws, &path) {
                 log::warn!("dialog result open failed, error notification pushed: {err}");
-                ws.notifications.push(Notification {
-                    kind: NotificationKind::Error,
-                    message: err.to_string(),
-                });
+                ops::notify(ws, &err);
             }
         }
         AsyncFileDialogResult::SaveDialogueAs {
@@ -187,14 +184,10 @@ pub fn apply_result(ws: &mut Workspace, result: AsyncFileDialogResult) {
             };
             // The engine's own message goes to the modal without the "invalid dialogue: " prefix.
             if let Err(err) = ops::save_doc_at(ws, index, &path) {
-                let note = ops::error_notification(&err);
                 // Log the kind only: a SaveRejected message carries the engine's error text,
                 // which quotes node ids (document content) and must not reach the log.
-                log::warn!(
-                    "dialog result save as failed, notification pushed: kind={:?}",
-                    note.kind
-                );
-                ws.notifications.push(note);
+                let kind = ops::notify(ws, &err);
+                log::warn!("dialog result save as failed, notification pushed: kind={kind:?}");
                 // On any error the document stays open and the close intent is dropped.
                 return;
             }
@@ -230,6 +223,7 @@ pub fn poll_async_dialogs(app_state: Res<AppState>) {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::model::NotificationKind;
     use crate::testkit::{TempDir, fixture};
 
     fn open_guard_result() -> AsyncFileDialogResult {
