@@ -1,8 +1,9 @@
 # Architecture
 
-AberredDialogueEditor is a single-scene AberredEngine app: a render-thread imgui GUI plus logic-thread ECS
-systems, sharing one `Workspace` through an `Arc<Mutex<..>>`. Everything about dialogue content lives in a
-pure Rust model that knows the engine's `DialogueDef` types and nothing else.
+AberredDialogueEditor is an AberredEngine app with two scenes: a short `intro` splash and the `editor`. The
+editor is a render-thread imgui GUI plus logic-thread ECS systems, sharing one `Workspace` through an
+`Arc<Mutex<..>>`. Everything about dialogue content lives in a pure Rust model that knows the engine's
+`DialogueDef` types and nothing else.
 
 ```
 render thread (GUI callback fn(&mut GuiCtx))        shared (AppState, inserted once in on_setup)     logic thread (systems, Update / Late)
@@ -13,6 +14,21 @@ render thread (GUI callback fn(&mut GuiCtx))        shared (AppState, inserted o
                                                                                                  window_resize observer
 ```
 
+## Scenes
+
+- `intro` (initial scene, `src/scenes/intro.rs`): the engine logo slides in under the `glitch` post-process
+  shader, then the `fade` shader takes the screen to black and the scene requests `editor`. A `Phase` entity
+  (`start` -> `medium` -> `fadeout`) drives the `uGlitch` and `fadeColor` uniforms; any action button skips
+  straight to the editor. The exit observer clears the shader chain and its uniforms.
+- The shaders and the logo are embedded in the binary (`include_str!`/`include_bytes!` from `assets/`) and
+  queued as `RenderAssetCmd`s in `systems::setup::load_state`. The engine stays in its `Setup` state until the
+  loads have replied, so the intro starts with its assets ready.
+- `editor` (`src/scenes/editor`): the dialogue editor. Its enter observer (`lifecycle.rs`) inserts a fresh
+  `MainCamera`, `GraphEntities` and `GraphInput`, disables camera follow and rebinds `Action2`; nothing the intro
+  set up leaks into it.
+- The graph systems are registered globally, so they also run while the intro plays. `load_state` seeds
+  `GraphEntities` and `GraphInput` so they never see a missing resource; with no document open they do nothing.
+
 ## Workspace model (`src/model`)
 
 `src/model` is pure: plain data and functions, no ECS/imgui/window. Its only engine imports are
@@ -20,7 +36,7 @@ render thread (GUI callback fn(&mut GuiCtx))        shared (AppState, inserted o
 DialogueTree, DialogueError, Vec2}`.
 
 - `Workspace { docs: Vec<DialogueDoc>, active: usize, next_doc_id, notifications, problems_hidden,
-  pending_close, pending_quit, show_controls, pending_context_menu }` — the single source of truth.
+  pending_close, pending_quit, show_controls, show_about, pending_context_menu }` — the single source of truth.
   `pending_close` holds the pending close's `doc_id` (never a tab index), resolved with
   `Workspace::position` at use, so tabs shifting while the modal is open cannot redirect it.
 - `DialogueDoc { doc_id, nodes: Vec<EdNode>, start: Option<NodeKey>, path, dirty, revision,
@@ -130,7 +146,7 @@ at debug — events only.
 ## GUI layer (`src/scenes/editor`)
 
 `gui.rs` runs one frame: publish capture flags, then menu → shortcuts → tabs → Nodes → Inspector → Problems →
-status bar → context menu → modals. Menu/shortcut/tab/context-menu/problem-row intents are collected as
+status bar → context menu → modals (notification, close, quit, Controls, About: one at a time, in that order). Menu/shortcut/tab/context-menu/problem-row intents are collected as
 `EditorAction`s and applied in ONE place, `actions::apply_action(ws, action, None)` under a short lock (native
 dialog requests come back in `ActionEffects::dialog` and are dispatched after the guard drops; `fx.quit` calls
 `intents.request_quit()`). While a native dialog is in flight, `CloseTab` actions are skipped (the pending Save As is
@@ -143,7 +159,7 @@ notification and no dialog is requested.
 
 - `EditorAction` (actions.rs): `New/Open/Save/SaveAs/CloseTab/Quit`, `FrameAll{viewport}` / `Relayout{viewport}`
   / `AddNode{viewport}` / `AddNodeAt(Vec2)` (viewport = `ui.io().display_size`, read by the producer),
-  `DeleteNode/SetStart/DeleteSelected/FocusNode(NodeKey)`, `ShowControls`, `ToggleProblems`.
+  `DeleteNode/SetStart/DeleteSelected/FocusNode(NodeKey)`, `ShowControls`, `ShowAbout`, `ToggleProblems`.
 - Inspector edits are the ONE deliberate exception: they go through the `Edit` enum and the pure
   `inspector::apply_edits(doc, &edits)`, **not** `apply_action` — because `apply_action` logs `{action:?}`,
   which would leak node text into the log. `apply_edits` logs only the edit kind and the node key, and edits
@@ -156,7 +172,7 @@ notification and no dialog is requested.
   `problems.rs` (Problems window, errors first; row click -> `FocusNode`), `status.rs` (bottom status bar),
   `tabs.rs` (tab strip, `###doc{doc_id}` ids), `context_menu.rs` (the `graph_ctx` popup drained from
   `pending_context_menu`), `modals.rs` (notification modal with kind-based title, unsaved-changes close/quit
-  confirms, Help > Controls modal), `menu.rs`, `shortcuts.rs` (imgui key state, gated on
+  confirms, Help > Controls and Help > About modals), `menu.rs`, `shortcuts.rs` (imgui key state, gated on
   `!io().want_text_input`; F not while Ctrl held; Ctrl+Shift+P toggles Problems).
 
 ## Ops layer (`src/ops`)
@@ -186,7 +202,7 @@ unsaved-changes modal's Save on an untitled doc).
 
 | File | What it is |
 |---|---|
-| `src/main.rs` | Entry: `env_logger` (default `info`), `EngineBuilder` wiring — `on_setup(load_state)`, `add_system(poll_async_dialogs)`, `add_system(graph_frame_system)`, `add_late_system(graph_projection_system)`, `add_late_system(graph_preview_system)`, `window_resize` observer, scene `"editor"` + enter + gui, `try_run()` |
+| `src/main.rs` | Entry: `env_logger` (default `info`), `EngineBuilder` wiring — `on_setup(load_state)`, `add_system(poll_async_dialogs)`, `add_system(graph_frame_system)`, `add_late_system(graph_projection_system)`, `add_late_system(graph_preview_system)`, `window_resize` observer, scenes `"intro"` (initial) and `"editor"` + enter + gui, `try_run()` |
 | `src/state.rs` | `UiCapture` (mouse/keyboard `AtomicBool`s), the handle aliases `UiCaptureHandle`, `WorkspaceMutex`, and `with_workspace` (the short-lock helper: runs a closure with the workspace locked, guard dropped on return) |
 | `src/model/mod.rs` | Model module root + re-exports (`from_def`/`to_def`, doc types, lint, notifications) |
 | `src/model/doc.rs` | `Workspace`, `DialogueDoc` + all named mutators, `revision`/`content_revision`/`dirty` rules, lint cache, `NodeKey`, `Link`, `EdChoice`, `Outputs`, `EdNode`, `Slot`, `CamState`, `ContextMenuRequest` |
@@ -210,7 +226,8 @@ unsaved-changes modal's Save on an untitled doc).
 | `src/graph/apply.rs` | `apply_actions` — maps `Action`s onto doc mutators, returns the `ContextMenuRequest` |
 | `src/graph/frame.rs` | `frame_doc` (`set_camera(frame_all(graph_bounds(doc), viewport, 40.0))`) |
 | `src/graph/preview.rs` | `graph_preview_system` — the single `GraphPreview` drag-link entity |
-| `src/scenes/mod.rs` | `pub mod editor` |
+| `src/scenes/mod.rs` | `pub mod editor`, `pub mod intro` |
+| `src/scenes/intro.rs` | The splash scene: `intro_enter` (logo sprite, camera, shader chain, `Phase`), `intro_shader_system` (glitch/fade phase machine, then `NextScene`), `intro_update` (skip on any action button), `intro_exit` (clears the chain and uniforms) |
 | `src/scenes/editor/mod.rs` | Editor module wiring, `gui`/`enter` re-exports, `display_viewport` |
 | `src/scenes/editor/lifecycle.rs` | Scene enter: insert `MainCamera`, `GraphEntities`, `GraphInput`; disable camera follow; rebind `Action2` to right mouse only |
 | `src/scenes/editor/gui.rs` | The scene GUI callback: capture flags, panel draw order, `EditorAction` queue application |
@@ -228,39 +245,12 @@ unsaved-changes modal's Save on an untitled doc).
 | `src/scenes/editor/problems.rs` | Problems window: `problem_counts`/`grouped_rows`/`row_target`/`header_*`, `should_draw` (a hidden window is not drawn at all) |
 | `src/scenes/editor/status.rs` | Bottom status bar + pure `file_text`/`problems_text`/`nodes_text`/`zoom_text` |
 | `src/scenes/editor/context_menu.rs` | `graph_ctx` popup: drains `pending_context_menu`, `items_for`, `PENDING` thread-local |
-| `src/scenes/editor/modals.rs` | Modals (notification/close/quit/Controls), the `CONTROLS` list, `apply_choice_ws`/`ChoiceEffect`, `modal_title` |
+| `src/scenes/editor/modals.rs` | Modals (notification/close/quit/Controls/About), the `CONTROLS` list, `apply_choice_ws`/`ChoiceEffect`, `modal_title` |
 | `src/scenes/editor/actions.rs` | `EditorAction`, `ActionEffects`, the single `apply_action`, `tab_label`, `close_decision`, `quit_decision` |
 | `src/systems/mod.rs` | `file_dialogs`, `setup`, `window_resize` |
-| `src/systems/setup.rs` | `on_setup` — inserts `UiCaptureHandle`, `WorkspaceMutex`, `AsyncFileDialogMutex` into `AppState` once |
+| `src/systems/setup.rs` | `on_setup` — inserts `UiCaptureHandle`, `WorkspaceMutex`, `AsyncFileDialogMutex` into `AppState` once, seeds `GraphEntities`/`GraphInput`, queues the intro's shaders and logo texture |
 | `src/systems/file_dialogs.rs` | rfd bridge: `request_async_dialog`, `dialog_in_flight`, `drain_completed`, pure `apply_result` (Save As keyed by `doc_id`, `close_after` closes the doc after a successful save), `poll_async_dialogs` |
 | `src/systems/window_resize.rs` | `WindowResized` observer: `GameConfig::set_render_size` + re-centre the camera offset (mouse coords stay 1:1) |
 | `src/testkit.rs` | `#[cfg(test)]` shared test helpers used by the model, graph, editor, ops and file-dialog tests: `fixture` (a path inside `tests/fixtures`), the `json` module with the embedded fixture JSON constants (`GUARD`, `LOOPS`, `DANGLING`, `DUP_ID`, `BOTH`, `EMPTY_CHOICES`, `NO_START` — `graph::fixtures` re-exports GUARD/LOOPS/DANGLING), `linked_doc` (a doc with `a --next--> b`, start = a), `ws_with_two_linked_nodes`, `ws_with_dirty_valid_doc` / `push_valid_doc` (valid-dirty-doc setups; `push_valid_doc` returns the new `doc_id`), `ws_with_duplicate_id_doc`, `app_state_with`, `TempDir` |
 
-## How to add ...
-
-- **A menu action:** add an `EditorAction` variant in `scenes/editor/actions.rs`, an arm in `apply_action`
-  (no-ops without an active doc where applicable), a menu item in `menu.rs` (and/or a key in `shortcuts.rs`),
-  plus a `#[cfg(test)]` test in `actions.rs`. Viewport-carrying actions (`FrameAll`, `Relayout`, `AddNode`) get
-  the viewport from `ui.io().display_size` at the producer (`display_viewport` in `scenes/editor/mod.rs`).
-- **An Inspector field / `Edit` variant:** add the variant to `Edit` in `inspector/edit.rs`, an arm in the pure
-  `apply_edits` (through the existing doc mutators) and in `Edit::log_kind` (which classifies it for logging —
-  the match is exhaustive, so a new variant cannot skip the rule; log only the kind + node key + structural
-  detail — `trace!` for per-keystroke kinds, `debug!` for structural ones), a widget in `node_fields.rs`/`outputs.rs`
-  that pushes the edit only when the widget reports a change, and tests for `apply_edits`. Widget ids come from
-  the `NodeKey`/indices, never from the edited text (the panel body is wrapped in `push_id(node{key})`).
-- **A new condition or effect kind** (when the engine enums gain one): extend `CondKind` (`of`/`name`/`KINDS`)
-  and the pure `convert_condition` in `inspector/expr.rs`, plus the per-kind arm in `condition_editor`;
-  extend `EffectKind` + `convert_effect` + the value-widget arm in `inspector/effects.rs`. Keep the serde-shape
-  tests green (every producible variant must serialize to the engine's internally-tagged snake_case JSON).
-- **A new lint rule:** add a `ProblemKind` variant in `model/lint.rs` (declaration order = report order within a
-  node), an arm in `lint`, and engine-parity tests in `lint.rs`'s `#[cfg(test)]` module (soundness: lint-clean
-  implies `engine_gate` Ok over the fixture + mutation family; coverage: each engine error maps to a lint
-  error). The Problems window needs no change (rows are generic over `Severity`/`Problem`), but the row is
-  clickable only when `problem.node` still exists.
-- **A new window/panel:** follow the standard pattern — a `snapshot(app_state)` that locks `WorkspaceMutex`
-  briefly (via `state::with_workspace`) and clones what the panel needs, `draw` that runs with the guard
-  dropped and collects intents (`EditorAction`s or `Edit`s), then a fresh short lock to apply; register the
-  draw call in `gui.rs`. A window
-  that can be hidden must not be drawn at all when hidden (imgui's `p_open` does not hide it — see
-  `problems.rs::should_draw`). Widget ids: `push_id_usize(index)` per row + fixed `###suffix` labels, never
-  content text.
+The "how to add ..." recipes live in [contributing.md](contributing.md).

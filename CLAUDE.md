@@ -1,10 +1,14 @@
 # AberredDialogueEditor
 
 Node-graph editor for AberredEngine dialogue JSON. Rust binary crate on the `aberredengine` git dependency
-(branch `develop-0.2.0`, `default-features = false`, pinned in `Cargo.lock`). See `README.md` for what the tool
-does and how to run it; `docs/architecture.md` for the architecture and "how to add ..." recipes;
-`docs/gotchas.md` for the engine/imgui/threading facts in full (symptom + rule); `docs/plans/` for the
-implementation plans. This file is the fast reference — read those docs before changing architecture.
+(pinned by `rev` in `Cargo.toml`, `default-features = false`). This file is the quick reference for anyone
+changing the code, human or tool. Read it before touching architecture, then the full docs:
+
+- `README.md` — what the tool does, how to build and run it.
+- `docs/architecture.md` — layers, threads, data flow, module map.
+- `docs/contributing.md` — setup, conventions and "how to add ..." recipes.
+- `docs/gotchas.md` — engine/imgui/threading facts, each with its symptom and rule.
+- `docs/dialogue-authoring.md` — using the editor and loading its files from Rust and Lua games.
 
 ## Commands
 
@@ -18,18 +22,18 @@ All acceptance commands are `just` recipes (run from the repo root):
 | `just run`  | `cargo run`                                                         |
 | `just fmt`  | `cargo fmt`                                                         |
 
-Debug logging at run time: `RUST_LOG=aberreddialogueeditor=debug just run` (default level is `info`, set in
+Debug logging at run time: `RUST_LOG=aberreddialogueeditor=debug just run` (the default level is `info`, set in
 `src/main.rs`).
 
-## Policies
+## Conventions
 
-- **Commit policy:** small, meaningful commits. Claude stages exactly the files that belong to a step
-  (`git add <explicit paths>`, never blind `git add -A`), proposes a one-line commit message with no
-  `Co-Authored-By` trailer, and stops. The user runs `git commit`. Claude never runs `git commit` or `git push`.
-- **Vibe policy:** implementation, code fixes, test creation, simplification and code review go through the
-  vibe MCP (`vibe_submit`/`vibe_wait`/`vibe_result(diff=true)`/`vibe_apply`/`vibe_cancel`). Claude does reasoning,
-  planning, specs, diff review, running the acceptance recipes and debugging. If the vibe MCP is not connected,
-  STOP and tell the user — do not silently implement.
+- Keep commits small and focused; run `just check` before pushing. A change that adds behaviour adds its tests
+  in the same commit.
+- Comments and rustdoc are present tense and explain *why* (the constraint, the engine quirk, the invariant),
+  not *what* the next line does. They never describe how the code used to be. Every module has a `//!` header
+  and every `pub` item a `///` line.
+- Never log document content (node text, speakers, whole files). Log events only, never per frame.
+- Never save over `tests/fixtures/*.json`: the tests load them. Save tests write to a `TempDir`.
 
 ## Gotchas
 
@@ -48,12 +52,15 @@ Full detail in `docs/gotchas.md`. The rules that prevent bugs:
   into the shared `UiCapture` atomics every frame; logic input systems gate on them.
 - `InputState::mouse_world_*` lags the camera by one tick — compute mouse world from the doc camera via
   `screen_to_world` (`graph::build_sample`), never pan with `mouse_world_*`.
-- `Action2` defaults to Enter OR right mouse; the editor rebinds it to right mouse only at scene enter
-  (`Action3` = middle mouse).
+- `Action2` defaults to Enter OR right mouse; the editor rebinds it to right mouse only at editor scene enter
+  (`Action3` = middle mouse). The intro scene runs before that, with the defaults.
 - Font metrics arrive asynchronously (`FontMetricsStore::resolve_key` + `PendingAssets`); `metrics_ready` is
   part of the node signature, so nodes respawn without/with texts when metrics land.
 - Children of graph entities must be spawned WITH a `GlobalTransform2D` (`child_global`), or they flash at the
   origin for one frame; root entities must NOT get one.
+- The graph systems are registered globally (`add_system`/`add_late_system`), so they also run during the
+  intro scene: `systems::setup::load_state` seeds `GraphEntities` and `GraphInput` so they never see a missing
+  resource.
 - imgui ids never depend on edited text, labels, dirty state or shifting indices: tab ids `###doc{doc_id}`,
   choice headers `###choice{i}`, fixed `###` section suffixes, `push_id_usize` per row.
 - imgui's `p_open` does not hide a window — draw nothing when hidden (`problems::should_draw`).
@@ -63,7 +70,6 @@ Full detail in `docs/gotchas.md`. The rules that prevent bugs:
   > 4 px (`interaction.rs`), so a click on a linked pin mutates nothing.
 - Never hold the `WorkspaceMutex` across imgui widget calls, `request_async_dialog`/`dialog_in_flight` or any
   rfd code: snapshot under a short lock, draw with the guard dropped, apply with a fresh lock.
-- Never log document content (no node text/speaker/whole files) — see Logging.
 - The lint cache is keyed on `content_revision`, not `revision`.
 - Engine imports go through `aberredengine::prelude::{...}`; `aberredengine::core::...` only for what the
   prelude lacks (`events::window::WindowResized`, `resources::input_bindings::InputBindings`,
@@ -79,7 +85,7 @@ Full detail in `docs/gotchas.md`. The rules that prevent bugs:
   typed modal queue `notifications: Vec<Notification>` (`Notification`/`NotificationKind` in
   `src/model/notify.rs`), `problems_hidden` (the INVERSE visibility flag of the Problems window — the derived
   `Default` = visible), `pending_close` (the pending close's `doc_id`, never a tab index — resolved with
-  `Workspace::position` at use), `pending_quit`/`show_controls`/`pending_context_menu`.
+  `Workspace::position` at use), and `pending_quit`/`show_controls`/`show_about`/`pending_context_menu`.
 - Every mutation on `DialogueDoc` goes through a named mutator; there is no public `&mut EdNode` accessor.
   Every mutator bumps `revision`; content mutators also bump `content_revision` and set `dirty`;
   `set_node_pos`, `select` and `mark_clean` only bump `revision` (view-only, never saved); `set_camera` bumps
@@ -109,6 +115,17 @@ Full detail in `docs/gotchas.md`. The rules that prevent bugs:
   inside `save_doc`/the Save As result path stays (the doc can be edited while the picker is open).
 - Doc paths are stored canonical/absolute by `open_path`/`save_doc`; `doc_title` is the file name or "Untitled".
 
+## Scenes
+
+- Two scenes: `intro` (initial; `src/scenes/intro.rs`) and `editor`. The intro plays a glitch/fade splash
+  (`Phase` machine `start` -> `medium` -> `fadeout` driving the `uGlitch`/`fadeColor` uniforms of the
+  `glitch`/`fade` post-process shaders) and hands over to `editor` when the fade completes or on any action
+  button. Its exit observer clears the post-process chain.
+- The shaders and the logo are embedded with `include_str!`/`include_bytes!` from `assets/` and queued as
+  `RenderAssetCmd`s in `systems::setup::load_state`; the engine leaves `Setup` only after they have loaded.
+- `scenes::editor::enter` re-inserts `MainCamera`, `GraphEntities` and `GraphInput` and rebinds `Action2`, so
+  nothing the intro did leaks into the editor.
+
 ## Graph
 
 - `src/graph` is pure logic except `components.rs`, `projection.rs`, `camera_system.rs`, `input_system.rs`,
@@ -116,20 +133,20 @@ Full detail in `docs/gotchas.md`. The rules that prevent bugs:
 - **Pure modules:** `style.rs` (numeric constants, palette, Z indices), `geometry.rs` (`rows`/`node_height`/
   `node_rect`, pins, `slot_at`, `hit_test` — pins beat bodies, later node in `doc.nodes` wins, `edge_curve`
   control points RELATIVE to the source pin, `arrow_tip_dir`, `graph_bounds`), `wrap.rs` (char-safe
-  `wrap_text` with `"..."` truncation, `fit_line`), `camera.rs` (`screen_to_world` plus `#[cfg(test)]`-only `world_to_screen`,
-  `zoom_at` clamp [0.1, 4.0], `pan_by_screen_delta`, `center_on`, `frame_all` clamp [0.1, 1.0], `None` ->
-  ZERO/1.0), `layout.rs` (`auto_layout`: BFS-depth layers from start, back edges ignored, unreachable nodes in
-  trailing columns, barycenter ordering, columns at `layer * (NODE_W + COL_GAP)` centred on y = 0; writes via
-  `set_node_pos`, so it never dirties).
+  `wrap_text` with `"..."` truncation, `fit_line`), `camera.rs` (`screen_to_world` plus `#[cfg(test)]`-only
+  `world_to_screen`, `zoom_at` clamp [0.1, 4.0], `pan_by_screen_delta`, `center_on`, `frame_all` clamp
+  [0.1, 1.0], `None` -> ZERO/1.0), `layout.rs` (`auto_layout`: BFS-depth layers from start, back edges
+  ignored, unreachable nodes in trailing columns, barycenter ordering, columns at
+  `layer * (NODE_W + COL_GAP)` centred on y = 0; writes via `set_node_pos`, so it never dirties).
 - **Projection:** `describe.rs` turns an `EdNode` into a `NodeVisual` (texts/pins local to the node top-left);
   `projection_plan.rs` snapshots a doc (`snapshot_of`, carrying `doc_id`/`revision`/`metrics_ready`) and diffs
   against the remembered `Snapshot` (`plan_projection` -> `ProjOp`s; edges are rewritten, never respawned, when
-  a node moves). `projection.rs` `graph_projection_system` (`add_late_system`, `GraphEntities` inserted at scene
-  enter) locks the workspace only to snapshot + clone spawn data, unlocks before any Commands/query call, and
-  returns early when the `(doc_id, revision, metrics_ready)` triple is unchanged. Nodes spawn as a root
-  (`GraphNode`, `WorldPosition`, `ZIndex`) with `GraphPart` children (body `rounded_rect` — thick outline only
-  when selected/error, header `rect`, `DynamicText` items once metrics are ready, pin circles — `Shape::circle`
-  is centred on its local origin); edges are bezier entities at the source pin with one arrowhead child.
+  a node moves). `projection.rs` `graph_projection_system` (`add_late_system`, `GraphEntities`) locks the
+  workspace only to snapshot + clone spawn data, unlocks before any Commands/query call, and returns early
+  when the `(doc_id, revision, metrics_ready)` triple is unchanged. Nodes spawn as a root (`GraphNode`,
+  `WorldPosition`, `ZIndex`) with `GraphPart` children (body `rounded_rect` — thick outline only when
+  selected/error, header `rect`, `DynamicText` items once metrics are ready, pin circles — `Shape::circle` is
+  centred on its local origin); edges are bezier entities at the source pin with one arrowhead child.
   `projection: N nodes, M edges` logs at debug only for STRUCTURAL plans (`is_structural`).
 - **Camera/input:** `camera_system.rs` `graph_frame_system` (`add_system`) is the single frame system, one
   workspace lock per tick, fixed order: wheel zoom (`apply_wheel` = `zoom_at` with `1.1^scroll_y` around the
@@ -149,8 +166,7 @@ Full detail in `docs/gotchas.md`. The rules that prevent bugs:
   the same pin a detached drag restores. Right press: > 4 px pans (`PanByScreenDelta`), else release emits
   `OpenContextMenu` + `Select`. `apply.rs` maps `Action`s onto the doc mutators and returns the
   `ContextMenuRequest`; link changes log `link set`/`link cleared` at debug (events only). `input_system.rs`
-  holds the `GraphInput` resource (inserted at scene enter); `preview.rs` keeps ONE `GraphPreview` entity while
-  a link is dragged.
+  holds the `GraphInput` resource; `preview.rs` keeps ONE `GraphPreview` entity while a link is dragged.
 - **Context menu / node actions:** `EditorAction` carries `AddNodeAt(Vec2)`/`AddNode{viewport}`/
   `DeleteNode(NodeKey)`/`SetStart(NodeKey)`/`DeleteSelected`, all applied in the single `apply_action`.
   `context_menu.rs` drains `Workspace.pending_context_menu` under a short lock and opens the `graph_ctx` popup
@@ -175,9 +191,9 @@ Full detail in `docs/gotchas.md`. The rules that prevent bugs:
 - Shortcuts (`shortcuts.rs`) are read with `ui.is_key_pressed(Key::..)` + `io().key_ctrl`/`key_shift`, only when
   `!io().want_text_input`; `F` does not fire while Ctrl is held; shortcuts are not polled while a modal is open
   (`gui.rs` skips `shortcuts::poll` for that frame when `Workspace::has_modal()` — imgui modals do not block
-  io-level key polling). Modals (notification queue, unsaved-changes close/quit, Help > Controls) open from the
-  frame's top-level scope after the menu, one at a time: notification first, Controls last (`modals.rs`;
-  `apply_choice_ws` is the pure core).
+  io-level key polling). Modals (notification queue, unsaved-changes close/quit, Help > Controls, Help >
+  About) open from the frame's top-level scope after the menu, one at a time: notification first, About last
+  (`modals.rs`; `apply_choice_ws` is the pure core).
 - Tabs (`tabs.rs`): ids `###doc{doc_id}` (`actions::tab_label`) so a dirty star or a closed tab never changes a
   tab's identity; on the `SET_SELECTED` frame every tab's selected report is ignored (`clicked_focus`); a
   clicked X drops imgui's neighbour re-selection and re-asserts the real active tab next frame
@@ -226,7 +242,7 @@ Full detail in `docs/gotchas.md`. The rules that prevent bugs:
   in `scenes/editor/actions.rs`, modal choices and outcomes in `scenes/editor/modals.rs`, `from_def` load
   warnings plus summary in `model/convert.rs`, the lint-cache recompute (content_revision, error/warning
   counts) in `model/doc.rs`, structural projection plans in `graph/projection.rs`, link set/cleared in
-  `graph/apply.rs`.
+  `graph/apply.rs`, intro scene enter/skip/exit in `scenes/intro.rs`.
 - Never log document content: no node text, speaker text or whole file contents.
 
 ## Testing

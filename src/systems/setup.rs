@@ -1,5 +1,6 @@
-//! The engine's `on_setup` hook, run once at startup: inserts the shared `AppState` handles
-//! and seeds the graph resources the globally registered graph systems read.
+//! The engine's `on_setup` hook, run once at startup: inserts the shared `AppState` handles,
+//! seeds the graph resources the globally registered graph systems read, and queues the intro
+//! scene's shaders and logo texture.
 
 use aberredengine::prelude::*;
 

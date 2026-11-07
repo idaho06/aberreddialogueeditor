@@ -1,7 +1,7 @@
 # Gotchas
 
 Hard-won engine / imgui / threading facts. Each entry: the symptom you see, then the rule. Engine facts are
-verified against `aberredengine` @ `0547e57` (the `Cargo.lock` pin, branch `develop-0.2.0`); editor facts
+verified against `aberredengine` @ `0547e57` (the `rev` pinned in `Cargo.toml`, branch `develop-0.2.0`); editor facts
 against this repo's `src/`.
 
 ## Engine / ECS

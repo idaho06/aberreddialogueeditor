@@ -6,7 +6,7 @@
 # App runtime state
 imgui.ini
 
-# AI assistant state (CLAUDE.md itself stays tracked: vibe jobs read it)
+# Local assistant and tool state (CLAUDE.md itself stays tracked)
 /.claude/
 .claude/settings.local.json
 /.vibe/
