@@ -20,10 +20,15 @@ fn main() {
         .add_late_system(graph::graph_projection_system)
         .add_late_system(graph::graph_preview_system)
         .add_observer(systems::window_resize::on_window_resized)
+        .add_scene("intro")
+        .on_scene_enter("intro", scenes::intro::intro_enter)
+        .add_scene_system("intro", scenes::intro::intro_update)
+        .add_scene_system("intro", scenes::intro::intro_shader_system)
+        .on_scene_exit("intro", scenes::intro::intro_exit)
         .add_scene("editor")
         .on_scene_enter("editor", scenes::editor::enter)
         .add_scene_gui("editor", scenes::editor::gui)
-        .initial_scene("editor")
+        .initial_scene("intro")
         .try_run()
     {
         log::error!("engine exited with an error: {err}");
