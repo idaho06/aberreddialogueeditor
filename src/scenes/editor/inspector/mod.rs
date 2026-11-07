@@ -2,7 +2,7 @@
 //! speaker, text, labels, start, outputs/choices incl. each choice's `when` condition and
 //! `effects`, and the node's on-enter effects).
 //!
-//! The PURE edit core — the [`Edit`] enum, [`OutputsMode`], [`change_mode`] and [`apply_edits`] —
+//! The PURE edit core — the [`Edit`] enum, [`OutputsMode`], `change_mode` and [`apply_edits`] —
 //! lives in `edit.rs` and is re-exported here; this module keeps the window itself.
 //!
 //! Locking (the standard panel pattern): the workspace is locked only to snapshot the selected

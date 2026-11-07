@@ -32,6 +32,7 @@ pub enum Edit {
     SetId(NodeKey, String),
     /// Set or clear the speaker.
     SetSpeaker(NodeKey, Option<String>),
+    /// Replace the node's dialogue text.
     SetText(NodeKey, String),
     /// Replace the whole labels vector.
     SetLabels(NodeKey, Vec<String>),
@@ -49,6 +50,7 @@ pub enum Edit {
     DeleteChoice(NodeKey, usize),
     /// Move choice `index` by `delta` positions (clamped at both ends).
     MoveChoice(NodeKey, usize, i32),
+    /// Replace choice `index`'s text.
     SetChoiceText(NodeKey, usize, String),
     /// Replace the whole labels vector of choice `index`.
     SetChoiceLabels(NodeKey, usize, Vec<String>),
@@ -103,8 +105,8 @@ impl EditLog {
 }
 
 impl Edit {
-    /// The edit's logging classification. The match is exhaustive, so a NEW variant cannot skip
-    /// the rule without a compile error here; the test below pins every variant's
+    /// The edit's logging classification. The match is exhaustive, so a variant added later
+    /// cannot skip the rule without a compile error here; the test below pins every variant's
     /// classification (name + per-keystroke/structural level + detail) so none can silently
     /// change. Payloads are ignored on purpose: content (text, ids, speaker, labels, keys,
     /// link payloads) must never reach the log.
@@ -839,9 +841,10 @@ mod tests {
             Edit::AddChoice(b),
             Edit::DeleteChoice(b, 0),
         ];
-        // All permutations of every 4-edit subset would be large; instead: all permutations of
-        // the first 5 pool entries (120 sequences) plus 400 deterministic pseudo-random
-        // sequences over the whole pool, checking the invariant after EVERY applied edit.
+        // All permutations of every 4-edit subset would be large, so this uses all
+        // permutations of the first 5 pool entries (120 sequences) plus 400 deterministic
+        // pseudo-random sequences over the whole pool, checking the invariant after EVERY
+        // applied edit.
         let mut sequences: Vec<Vec<Edit>> = Vec::new();
         let head: Vec<Edit> = pool[..5].to_vec();
         permute(&head, 0, &mut sequences);

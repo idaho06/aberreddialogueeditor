@@ -16,11 +16,17 @@ use super::widgets::{RowAction, key_editor, reorder_delete_row, type_combo};
 /// The six effect kinds the type combo can switch between.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum EffectKind {
+    /// Sets a boolean flag on a signal key.
     SetFlag,
+    /// Clears a boolean flag on a signal key.
     RemoveFlag,
+    /// Sets an integer signal to a value.
     SetInteger,
+    /// Adds a delta to an integer signal.
     AddInteger,
+    /// Sets a scalar signal to a value.
     SetScalar,
+    /// Sets a string signal to a value.
     SetString,
 }
 

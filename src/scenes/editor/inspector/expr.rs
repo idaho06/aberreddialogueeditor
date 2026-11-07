@@ -26,11 +26,17 @@ const CMP_SYMBOLS: [(DialogueCmp, &str); 6] = [
 /// The six condition kinds the type combo can switch between.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum CondKind {
+    /// A flag-presence check on a signal key.
     Flag,
+    /// An integer comparison (`op` against `value`) on a signal key.
     Integer,
+    /// A string equality check on a signal key.
     StringEquals,
+    /// Negation of a single child condition.
     Not,
+    /// Conjunction: every child must hold.
     All,
+    /// Disjunction: at least one child must hold.
     Any,
 }
 
