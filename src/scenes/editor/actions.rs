@@ -327,16 +327,11 @@ fn request_save_as(
 mod tests {
     use super::*;
     use crate::model::{CamState, Link, NotificationKind, Outputs};
-    use crate::testkit::{TempDir, fixture, ws_with_duplicate_id_doc, ws_with_two_linked_nodes};
+    use crate::testkit::{
+        TempDir, fixture, push_valid_doc, ws_with_dirty_valid_doc, ws_with_duplicate_id_doc,
+        ws_with_two_linked_nodes,
+    };
     use aberredengine::prelude::Vec2;
-
-    /// A workspace with one valid dirty doc (one node, so the engine gate passes).
-    fn ws_with_dirty_valid_doc() -> Workspace {
-        let mut ws = Workspace::default();
-        ops::new_doc(&mut ws);
-        ws.active_doc_mut().unwrap().add_node(Vec2::ZERO);
-        ws
-    }
 
     #[test]
     fn tab_label_uses_a_stable_doc_id_after_the_hashes() {
@@ -378,8 +373,7 @@ mod tests {
             "adding a node dirties the doc"
         );
         ws.active_doc_mut().unwrap().mark_clean();
-        ops::new_doc(&mut ws);
-        ws.active_doc_mut().unwrap().add_node(Vec2::ZERO);
+        push_valid_doc(&mut ws);
         assert_eq!(
             quit_decision(&ws),
             QuitDecision::Confirm,
@@ -415,9 +409,8 @@ mod tests {
     #[test]
     fn save_as_queues_the_save_dialog_for_the_active_docs_doc_id() {
         let mut ws = ws_with_dirty_valid_doc();
-        ops::new_doc(&mut ws); // active doc is now index 1
-        // An empty new doc has no start and would be rejected up front: make it valid.
-        ws.active_doc_mut().unwrap().add_node(Vec2::ZERO);
+        // An empty new doc has no start and would be rejected up front: push a valid one.
+        push_valid_doc(&mut ws); // active doc is now index 1
         assert_eq!(ws.active, 1, "the second doc is active");
         let active_id = ws.active_doc().unwrap().doc_id;
         let fx = apply_action(&mut ws, EditorAction::SaveAs, None);
@@ -505,8 +498,7 @@ mod tests {
     #[test]
     fn save_without_a_path_behaves_like_save_as_with_the_active_doc_id() {
         let mut ws = ws_with_dirty_valid_doc();
-        ops::new_doc(&mut ws); // second, untitled doc is active
-        ws.active_doc_mut().unwrap().add_node(Vec2::ZERO); // valid
+        push_valid_doc(&mut ws); // second, untitled valid doc is active
         assert_eq!(ws.active, 1);
         assert!(ws.active_doc().unwrap().path.is_none(), "untitled");
         let active_id = ws.active_doc().unwrap().doc_id;
@@ -597,8 +589,7 @@ mod tests {
     fn close_tab_clean_closes_immediately_and_dirty_asks() {
         let mut ws = Workspace::default();
         ops::new_doc(&mut ws); // doc 0, clean
-        ops::new_doc(&mut ws); // doc 1, active, clean
-        ws.active_doc_mut().unwrap().add_node(Vec2::ZERO); // doc 1 dirty
+        push_valid_doc(&mut ws); // doc 1, active, dirty
 
         let fx = apply_action(&mut ws, EditorAction::CloseTab(0), None);
         assert!(fx.dialog.is_none() && !fx.quit);

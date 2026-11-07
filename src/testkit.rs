@@ -4,7 +4,7 @@ use std::path::PathBuf;
 
 use aberredengine::prelude::{AppState, Vec2};
 
-use crate::model::{Link, NodeKey, Slot, Workspace};
+use crate::model::{DialogueDoc, Link, NodeKey, Slot, Workspace};
 use crate::ops;
 use crate::state::WorkspaceMutex;
 
@@ -15,6 +15,39 @@ pub fn fixture(name: &str) -> PathBuf {
         .join(name)
 }
 
+/// The fixture JSON files under `tests/fixtures/`, embedded once — the single source of the
+/// fixture constants every test module uses (`graph::fixtures` re-exports GUARD/LOOPS/DANGLING).
+pub mod json {
+    pub const GUARD: &str = include_str!(concat!(
+        env!("CARGO_MANIFEST_DIR"),
+        "/tests/fixtures/guard.json"
+    ));
+    pub const LOOPS: &str = include_str!(concat!(
+        env!("CARGO_MANIFEST_DIR"),
+        "/tests/fixtures/loops.json"
+    ));
+    pub const DANGLING: &str = include_str!(concat!(
+        env!("CARGO_MANIFEST_DIR"),
+        "/tests/fixtures/invalid_dangling.json"
+    ));
+    pub const DUP_ID: &str = include_str!(concat!(
+        env!("CARGO_MANIFEST_DIR"),
+        "/tests/fixtures/invalid_dup_id.json"
+    ));
+    pub const BOTH: &str = include_str!(concat!(
+        env!("CARGO_MANIFEST_DIR"),
+        "/tests/fixtures/invalid_both_next_choices.json"
+    ));
+    pub const EMPTY_CHOICES: &str = include_str!(concat!(
+        env!("CARGO_MANIFEST_DIR"),
+        "/tests/fixtures/invalid_empty_choices.json"
+    ));
+    pub const NO_START: &str = include_str!(concat!(
+        env!("CARGO_MANIFEST_DIR"),
+        "/tests/fixtures/invalid_no_start.json"
+    ));
+}
+
 /// An `AppState` with `ws` inserted as the `WorkspaceMutex` handle (as `on_setup` does).
 pub fn app_state_with(ws: Workspace) -> AppState {
     let mut app_state = AppState::default();
@@ -22,19 +55,37 @@ pub fn app_state_with(ws: Workspace) -> AppState {
     app_state
 }
 
+/// A doc with `a --next--> b` (start = a, no selection; dirty from the added nodes).
+pub fn linked_doc() -> (DialogueDoc, NodeKey, NodeKey) {
+    let mut doc = DialogueDoc::new_empty();
+    let a = doc.add_node(Vec2::ZERO);
+    let b = doc.add_node(Vec2::new(100.0, 0.0));
+    doc.set_link(a, Slot::Next, Link::Node(b));
+    (doc, a, b)
+}
+
 /// A workspace with one doc holding `a --next--> b` (start = a, no selection; dirty from
 /// the added nodes).
 pub fn ws_with_two_linked_nodes() -> (Workspace, NodeKey, NodeKey) {
+    let (doc, a, b) = linked_doc();
     let mut ws = Workspace::default();
-    ops::new_doc(&mut ws);
-    let (a, b) = {
-        let doc = ws.active_doc_mut().unwrap();
-        let a = doc.add_node(Vec2::ZERO);
-        let b = doc.add_node(Vec2::new(100.0, 0.0));
-        doc.set_link(a, Slot::Next, Link::Node(b));
-        (a, b)
-    };
+    ws.add_doc(doc);
     (ws, a, b)
+}
+
+/// Adds a new untitled doc with one node to `ws` and activates it — a VALID dirty doc (the one
+/// node is the start, so the engine save gate passes) — and returns its `doc_id`.
+pub fn push_valid_doc(ws: &mut Workspace) -> u64 {
+    ops::new_doc(ws);
+    ws.active_doc_mut().unwrap().add_node(Vec2::ZERO);
+    ws.active_doc().unwrap().doc_id
+}
+
+/// A workspace with one valid dirty doc (one node, so the engine gate passes).
+pub fn ws_with_dirty_valid_doc() -> Workspace {
+    let mut ws = Workspace::default();
+    push_valid_doc(&mut ws);
+    ws
 }
 
 /// A workspace with one UNTITLED doc holding two nodes with the SAME id (a duplicate id:

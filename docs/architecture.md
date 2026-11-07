@@ -194,7 +194,7 @@ unsaved-changes modal's Save on an untitled doc).
 | `src/model/lint.rs` | `Severity`/`ProblemKind`/`Problem`, `lint` (all problems, deterministic order), `engine_gate` (`DialogueTree::try_from(to_def(doc))`) |
 | `src/model/notify.rs` | `Notification`/`NotificationKind` (`Error`, `SaveRejected`) queue entries for the GUI modal |
 | `src/ops/mod.rs` | `open_path`/`check_saveable`/`save_doc`/`save_doc_at`/`new_doc`/`close_doc`/`doc_title`, `OpenOutcome`, `OpError`, `error_notification`, `notify` (push the typed notification + return its kind) |
-| `src/graph/mod.rs` | Graph module wiring, re-exports, `#[cfg(test)] fixtures` helper (fixture JSON + laid-out guard doc) |
+| `src/graph/mod.rs` | Graph module wiring, re-exports, `#[cfg(test)] fixtures` helper (re-exports the `testkit::json` fixture constants + laid-out guard doc) |
 | `src/graph/style.rs` | Numeric constants (node/pin/row/gap sizes, edge/outline thickness, `FONT`), palette, Z indices |
 | `src/graph/geometry.rs` | `rows`/`node_height`/`node_rect`, `input_pin`/`output_pin`/`slot_at`, `hit_test`, `edge_curve`, `arrow_tip_dir`, `graph_bounds` |
 | `src/graph/wrap.rs` | Char-safe greedy `wrap_text` with `"..."` truncation + `fit_line` |
@@ -234,7 +234,7 @@ unsaved-changes modal's Save on an untitled doc).
 | `src/systems/setup.rs` | `on_setup` — inserts `UiCaptureHandle`, `WorkspaceMutex`, `AsyncFileDialogMutex` into `AppState` once |
 | `src/systems/file_dialogs.rs` | rfd bridge: `request_async_dialog`, `dialog_in_flight`, `drain_completed`, pure `apply_result` (Save As keyed by `doc_id`, `close_after` closes the doc after a successful save), `poll_async_dialogs` |
 | `src/systems/window_resize.rs` | `WindowResized` observer: `GameConfig::set_render_size` + re-centre the camera offset (mouse coords stay 1:1) |
-| `src/testkit.rs` | `#[cfg(test)]` shared test helpers used by the editor, ops and file-dialog tests: `fixture`, `app_state_with`, `ws_with_two_linked_nodes`, `ws_with_duplicate_id_doc`, `TempDir` |
+| `src/testkit.rs` | `#[cfg(test)]` shared test helpers used by the model, graph, editor, ops and file-dialog tests: `fixture` (a path inside `tests/fixtures`), the `json` module with the embedded fixture JSON constants (`GUARD`, `LOOPS`, `DANGLING`, `DUP_ID`, `BOTH`, `EMPTY_CHOICES`, `NO_START` — `graph::fixtures` re-exports GUARD/LOOPS/DANGLING), `linked_doc` (a doc with `a --next--> b`, start = a), `ws_with_two_linked_nodes`, `ws_with_dirty_valid_doc` / `push_valid_doc` (valid-dirty-doc setups; `push_valid_doc` returns the new `doc_id`), `ws_with_duplicate_id_doc`, `app_state_with`, `TempDir` |
 
 ## How to add ...
 

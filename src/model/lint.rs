@@ -159,30 +159,14 @@ mod tests {
     use super::*;
     use crate::model::convert::{from_def, to_def};
     use crate::model::doc::{DialogueDoc, NodeKey, Outputs, Slot};
+    use crate::testkit::json::{BOTH, DANGLING, DUP_ID, EMPTY_CHOICES, GUARD, LOOPS, NO_START};
+    use crate::testkit::linked_doc;
     use aberredengine::prelude::{DialogueDef, Vec2};
 
     /// True when `problems` contains at least one [`Severity::Error`].
     fn has_errors(problems: &[Problem]) -> bool {
         problems.iter().any(|p| p.severity == Severity::Error)
     }
-
-    macro_rules! fixture {
-        ($name:literal) => {
-            include_str!(concat!(
-                env!("CARGO_MANIFEST_DIR"),
-                "/tests/fixtures/",
-                $name,
-                ".json"
-            ))
-        };
-    }
-    const GUARD: &str = fixture!("guard");
-    const LOOPS: &str = fixture!("loops");
-    const DANGLING: &str = fixture!("invalid_dangling");
-    const DUP_ID: &str = fixture!("invalid_dup_id");
-    const BOTH: &str = fixture!("invalid_both_next_choices");
-    const EMPTY_CHOICES: &str = fixture!("invalid_empty_choices");
-    const NO_START: &str = fixture!("invalid_no_start");
 
     fn parse(json: &str) -> DialogueDef {
         serde_json::from_str(json).expect("fixture must parse as DialogueDef")
@@ -205,10 +189,7 @@ mod tests {
 
     /// A doc with `a --next--> b`, `b` having one choice ("go", target End), start = a.
     fn base_doc() -> (DialogueDoc, NodeKey, NodeKey) {
-        let mut doc = DialogueDoc::new_empty();
-        let a = doc.add_node(Vec2::ZERO);
-        let b = doc.add_node(Vec2::new(10.0, 0.0));
-        doc.set_link(a, Slot::Next, Link::Node(b));
+        let (mut doc, a, b) = linked_doc();
         doc.add_choice(b);
         doc.set_choice_text(b, 0, "go".to_owned());
         (doc, a, b)

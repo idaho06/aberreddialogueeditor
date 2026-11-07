@@ -232,8 +232,13 @@ Full detail in `docs/gotchas.md`. The rules that prevent bugs:
 ## Testing
 
 - Tests live in `#[cfg(test)]` modules inside the source files: this is a binary crate, so `tests/` cannot
-  import its modules (fixtures load via `include_str!(concat!(env!("CARGO_MANIFEST_DIR"), ...))`; shared
-  helpers: `graph::fixtures`, `crate::testkit` with `fixture(...)` and `TempDir`).
+  import its modules (fixtures load via `include_str!(concat!(env!("CARGO_MANIFEST_DIR"), ...))`).
+  Shared helpers all live in `crate::testkit` (`graph::fixtures` only re-exports the JSON constants and adds
+  the laid-out guard doc): `fixture(name)` (a path inside `tests/fixtures`), the `json` module with the
+  embedded fixture constants `GUARD`, `LOOPS`, `DANGLING`, `DUP_ID`, `BOTH`, `EMPTY_CHOICES`, `NO_START`,
+  `linked_doc()` (a doc with `a --next--> b`, start = a), `ws_with_two_linked_nodes()`,
+  `ws_with_dirty_valid_doc()` / `push_valid_doc(&mut ws) -> u64` (valid-dirty-doc workspace setups),
+  `ws_with_duplicate_id_doc()`, `app_state_with(ws)` and `TempDir`.
 - NEVER save over `tests/fixtures/*.json` — the tests load them; save tests write to a `TempDir`, and in the app
   use Save As to a copy.
 - Engine-parity tests guard against drift: lint soundness (lint-clean implies `engine_gate` Ok over all fixtures

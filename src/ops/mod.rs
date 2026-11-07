@@ -233,13 +233,9 @@ pub fn notify(ws: &mut Workspace, err: &OpError) -> NotificationKind {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::testkit::json::GUARD;
     use crate::testkit::{TempDir, fixture};
     use aberredengine::prelude::{Vec2, load_dialogue};
-
-    const GUARD_JSON: &str = include_str!(concat!(
-        env!("CARGO_MANIFEST_DIR"),
-        "/tests/fixtures/guard.json"
-    ));
 
     /// `path.canonicalize()`, for comparing against the canonical paths ops stores on docs.
     fn canon(path: &Path) -> PathBuf {
@@ -303,7 +299,7 @@ mod tests {
 
         let mut ws2 = Workspace::default();
         open_path(&mut ws2, &save_path).expect("the saved file reopens");
-        let original: DialogueDef = serde_json::from_str(GUARD_JSON).unwrap();
+        let original: DialogueDef = serde_json::from_str(GUARD).unwrap();
         assert_eq!(
             to_def(ws2.active_doc().unwrap()),
             original,

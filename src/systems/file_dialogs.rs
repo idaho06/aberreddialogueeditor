@@ -224,7 +224,7 @@ pub fn poll_async_dialogs(app_state: Res<AppState>) {
 mod tests {
     use super::*;
     use crate::model::NotificationKind;
-    use crate::testkit::{TempDir, fixture};
+    use crate::testkit::{TempDir, fixture, push_valid_doc};
 
     fn open_guard_result() -> AsyncFileDialogResult {
         AsyncFileDialogResult::OpenDialogue {
@@ -517,9 +517,7 @@ mod tests {
         let tmp = TempDir::new("dialogs", "save-close-after");
         let mut ws = Workspace::default();
         ops::new_doc(&mut ws); // doc A, id 1
-        ops::new_doc(&mut ws); // doc B, id 2, active
-        let b_id = ws.docs[1].doc_id;
-        ws.active_doc_mut().unwrap().add_node(Vec2::ZERO); // B valid + dirty
+        let b_id = push_valid_doc(&mut ws); // doc B, id 2, active: valid + dirty
 
         let out = tmp.join("b.json");
         apply_result(&mut ws, save_as_result(b_id, true, out.clone()));

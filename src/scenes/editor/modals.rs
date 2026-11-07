@@ -300,7 +300,7 @@ fn apply_choice(app_state: &AppState, choice: Option<ModalChoice>) -> bool {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::testkit::{TempDir, fixture, ws_with_duplicate_id_doc};
+    use crate::testkit::{TempDir, fixture, ws_with_dirty_valid_doc, ws_with_duplicate_id_doc};
     use aberredengine::prelude::Vec2;
 
     #[test]
@@ -326,9 +326,7 @@ mod tests {
 
     #[test]
     fn close_save_on_an_untitled_valid_doc_returns_the_save_as_dialog_with_the_doc_id() {
-        let mut ws = Workspace::default();
-        ops::new_doc(&mut ws);
-        ws.active_doc_mut().unwrap().add_node(Vec2::ZERO); // one node = start: valid
+        let mut ws = ws_with_dirty_valid_doc(); // one node = start: valid
         let doc_id = ws.docs[0].doc_id;
         ws.pending_close = Some(doc_id);
         assert_eq!(

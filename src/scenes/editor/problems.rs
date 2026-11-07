@@ -240,7 +240,7 @@ mod tests {
     use super::*;
     use crate::model::{DialogueDoc, ProblemKind, Workspace, from_def, lint};
     use crate::state::WorkspaceMutex;
-    use crate::testkit::app_state_with;
+    use crate::testkit::{app_state_with, fixture, push_valid_doc};
     use aberredengine::prelude::{DialogueDef, Vec2};
 
     fn prob(severity: Severity, kind: ProblemKind, node: Option<NodeKey>, msg: &str) -> Problem {
@@ -288,8 +288,7 @@ mod tests {
             "invalid_dup_id.json",
             "invalid_no_start.json",
         ] {
-            let path = concat!(env!("CARGO_MANIFEST_DIR"), "/tests/fixtures/");
-            let json = std::fs::read_to_string(format!("{path}{name}")).expect("fixture exists");
+            let json = std::fs::read_to_string(fixture(name)).expect("fixture exists");
             let def: DialogueDef = serde_json::from_str(&json).expect("fixture parses");
             let mut doc = from_def(&def);
             let fresh = lint(&doc);
@@ -443,9 +442,8 @@ mod tests {
     fn snapshot_captures_problems_node_existence_warnings_and_visibility() {
         let app_state = app_state_with({
             let mut ws = Workspace::default();
-            crate::ops::new_doc(&mut ws);
+            push_valid_doc(&mut ws);
             let doc = ws.active_doc_mut().unwrap();
-            doc.add_node(Vec2::ZERO);
             doc.start = Some(NodeKey(999)); // stale start key: StartMissing with node_exists=false
             doc.load_warnings.push("warned".to_owned());
             ws

@@ -177,36 +177,8 @@ fn link_to_next(doc: &DialogueDoc, link: &Link) -> Option<String> {
 mod tests {
     use super::*;
     use crate::model::doc::{DialogueDoc, EdChoice, Link, NodeKey, Outputs, Slot};
+    use crate::testkit::json::{BOTH, DANGLING, DUP_ID, EMPTY_CHOICES, GUARD, LOOPS, NO_START};
     use aberredengine::prelude::{DialogueCondition, DialogueDef, Vec2};
-
-    const GUARD: &str = include_str!(concat!(
-        env!("CARGO_MANIFEST_DIR"),
-        "/tests/fixtures/guard.json"
-    ));
-    const LOOPS: &str = include_str!(concat!(
-        env!("CARGO_MANIFEST_DIR"),
-        "/tests/fixtures/loops.json"
-    ));
-    const DANGLING: &str = include_str!(concat!(
-        env!("CARGO_MANIFEST_DIR"),
-        "/tests/fixtures/invalid_dangling.json"
-    ));
-    const DUP_ID: &str = include_str!(concat!(
-        env!("CARGO_MANIFEST_DIR"),
-        "/tests/fixtures/invalid_dup_id.json"
-    ));
-    const BOTH: &str = include_str!(concat!(
-        env!("CARGO_MANIFEST_DIR"),
-        "/tests/fixtures/invalid_both_next_choices.json"
-    ));
-    const EMPTY_CHOICES: &str = include_str!(concat!(
-        env!("CARGO_MANIFEST_DIR"),
-        "/tests/fixtures/invalid_empty_choices.json"
-    ));
-    const NO_START: &str = include_str!(concat!(
-        env!("CARGO_MANIFEST_DIR"),
-        "/tests/fixtures/invalid_no_start.json"
-    ));
 
     fn parse(json: &str) -> DialogueDef {
         serde_json::from_str(json).expect("fixture must parse as DialogueDef")

@@ -138,15 +138,11 @@ pub fn draw(ctx: &mut GuiCtx) {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::model::{Link, Slot};
-    use aberredengine::prelude::Vec2;
+    use crate::testkit::linked_doc;
 
     /// A clean doc with `a --next--> b`; `a` has id node_1, speaker Guard, text hello, one label.
     fn base_doc() -> (DialogueDoc, NodeKey, NodeKey) {
-        let mut doc = DialogueDoc::new_empty();
-        let a = doc.add_node(Vec2::ZERO);
-        let b = doc.add_node(Vec2::new(10.0, 0.0));
-        doc.set_link(a, Slot::Next, Link::Node(b));
+        let (mut doc, a, b) = linked_doc();
         doc.set_text(a, "hello".to_owned());
         doc.set_speaker(a, Some("Guard".to_owned()));
         doc.set_labels(a, vec!["l1".to_owned()]);

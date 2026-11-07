@@ -49,18 +49,7 @@ pub(crate) mod fixtures {
     use super::auto_layout;
     use crate::model::{DialogueDoc, EdNode, NodeKey, from_def};
 
-    pub const GUARD: &str = include_str!(concat!(
-        env!("CARGO_MANIFEST_DIR"),
-        "/tests/fixtures/guard.json"
-    ));
-    pub const LOOPS: &str = include_str!(concat!(
-        env!("CARGO_MANIFEST_DIR"),
-        "/tests/fixtures/loops.json"
-    ));
-    pub const DANGLING: &str = include_str!(concat!(
-        env!("CARGO_MANIFEST_DIR"),
-        "/tests/fixtures/invalid_dangling.json"
-    ));
+    pub use crate::testkit::json::{DANGLING, GUARD, LOOPS};
 
     /// guard.json keys (1-based in node order): greet = 1 (3 choices), friend = 2 (Next(End)),
     /// pass = 3 (Next(friend)).

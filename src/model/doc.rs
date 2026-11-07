@@ -551,14 +551,12 @@ mod tests {
     use super::*;
     use crate::model::lint::ProblemKind;
     use crate::model::notify::NotificationKind;
+    use crate::testkit::linked_doc;
     use aberredengine::prelude::{DialogueCondition, DialogueEffect};
 
     /// A doc with `a --next--> b`, `b` having one choice ("go", target End), start = a, clean.
     fn base_doc() -> (DialogueDoc, NodeKey, NodeKey) {
-        let mut doc = DialogueDoc::new_empty();
-        let a = doc.add_node(Vec2::ZERO);
-        let b = doc.add_node(Vec2::new(10.0, 0.0));
-        doc.set_link(a, Slot::Next, Link::Node(b));
+        let (mut doc, a, b) = linked_doc();
         doc.add_choice(b);
         doc.set_choice_text(b, 0, "go".to_owned());
         doc.mark_clean();
