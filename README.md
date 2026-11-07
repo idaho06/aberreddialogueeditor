@@ -8,6 +8,8 @@ editor loads any dialogue JSON the engine accepts (plus some it rejects, so you 
 automatically, lets you edit every field, shows all validation problems live, and saves JSON that the engine
 loads unchanged.
 
+![The editor showing the guard dialogue: the node graph, the Nodes and Problems windows and the Inspector](docs/images/editor.png)
+
 ## Features
 
 - Node graph canvas: drag nodes, drag links between pins, pan, zoom, frame-all, auto-layout.
