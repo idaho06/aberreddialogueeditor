@@ -2,8 +2,8 @@
 //! modal (first entry of `ws.notifications` — title chosen by its [`NotificationKind`]),
 //! the "Unsaved changes" confirm for a pending tab close, the "Unsaved changes" confirm for a
 //! pending quit, the Help > "Controls" modal (`ws.show_controls`) and the Help > "About..." modal
-//! (`ws.show_about`). Only one shows at a
-//! time; priority is notification, close, quit, then Controls, then About (lowest).
+//! (`ws.show_about`). Only one shows at a time; the priority is notification, close,
+//! quit, then Controls, then About (lowest).
 //!
 //! Locking: the workspace is locked to snapshot the modal state, the guard is dropped while
 //! the widgets are drawn, and a button click is applied with a fresh short lock. The Save As
@@ -212,9 +212,8 @@ fn apply_choice_ws(ws: &mut Workspace, choice: ModalChoice) -> ChoiceEffect {
             }
         }
         ModalChoice::CloseSave => {
-            // Resolve the pending close's doc_id to its CURRENT tab index; a doc that is no
-            // longer open means no modal target — clear the stale value like an out-of-range
-            // index used to.
+            // Resolve the pending close's doc_id to its current tab index; a doc that is no
+            // longer open has no modal target, so clear the stale pending value.
             let Some(index) = ws.pending_close.and_then(|doc_id| ws.position(doc_id)) else {
                 ws.pending_close = None;
                 log::debug!("modal {choice:?}: pending close doc is no longer open, cleared");
@@ -389,8 +388,8 @@ mod tests {
     fn close_discard_after_another_tab_was_closed_discards_the_original_pending_tab() {
         // The data-loss scenario: tabs [B clean(0), A dirty(1), C dirty(2)]; X on A sets
         // pending_close = A's doc_id and opens the modal; a shortcut (Ctrl+W) closes B while the
-        // modal is open; "Discard" must close A — the tab the user confirmed — not C, which now
-        // sits at index 0.
+        // modal is open; "Discard" must close A — the tab the user confirmed — not C, which a
+        // stale tab index would hit.
         let mut ws = Workspace::default();
         ops::new_doc(&mut ws); // B, index 0, clean
         ws.docs[0].path = Some(std::path::PathBuf::from("/tmp/b.json"));

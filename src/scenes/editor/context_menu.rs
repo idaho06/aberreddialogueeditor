@@ -44,7 +44,7 @@ pub fn items_for(request: ContextMenuRequest) -> Vec<(&'static str, EditorAction
 /// Drains `Workspace.pending_context_menu` (short lock, dropped before any imgui call), opens
 /// the popup once per request and renders its items. Clicking an item pushes the
 /// [`EditorAction`] and closes the popup; the queued actions are applied by
-/// [`crate::scenes::editor::gui`] afterwards.
+/// [`crate::scenes::editor::gui()`] afterwards.
 pub fn draw(ctx: &mut GuiCtx, actions: &mut Vec<EditorAction>) {
     let request = with_workspace(ctx.app_state, |ws| ws.pending_context_menu.take()).flatten();
     if let Some(request) = request {
@@ -60,7 +60,6 @@ pub fn draw(ctx: &mut GuiCtx, actions: &mut Vec<EditorAction>) {
             let items = items_for(request);
             let multi = items.len() > 1;
             for (index, (label, action)) in items.iter().enumerate() {
-                // One separator before the last item when there is more than one item.
                 if multi && index + 1 == items.len() {
                     ui.separator();
                 }
@@ -72,7 +71,6 @@ pub fn draw(ctx: &mut GuiCtx, actions: &mut Vec<EditorAction>) {
         }
     });
     if !open {
-        // The popup is not open any more: forget the stored request.
         PENDING.with(|pending| pending.set(None));
     }
 }

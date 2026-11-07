@@ -416,7 +416,7 @@ mod tests {
     fn save_as_queues_the_save_dialog_for_the_active_docs_doc_id() {
         let mut ws = ws_with_dirty_valid_doc();
         // An empty new doc has no start and would be rejected up front: push a valid one.
-        push_valid_doc(&mut ws); // active doc is now index 1
+        push_valid_doc(&mut ws);
         assert_eq!(ws.active, 1, "the second doc is active");
         let active_id = ws.active_doc().unwrap().doc_id;
         let fx = apply_action(&mut ws, EditorAction::SaveAs, None);

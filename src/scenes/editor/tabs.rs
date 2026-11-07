@@ -37,9 +37,9 @@ fn snapshot(app_state: &AppState) -> Option<(Vec<String>, usize)> {
     })
 }
 
-/// Which tab a click should focus. On the `SET_SELECTED` frame imgui still reports the previously
-/// selected tab as selected, so that stale report must be ignored — otherwise the active tab
-/// ping-pongs between the old and new tab on every frame.
+/// Which tab a click should focus. On the `SET_SELECTED` frame imgui still reports the tab that
+/// was selected before this frame as selected, so that stale report must be ignored — otherwise
+/// the active tab ping-pongs between the two tabs on every frame.
 fn clicked_focus(select_frame: bool, active: usize, index: usize, selected: bool) -> Option<usize> {
     if !select_frame && selected && index != active {
         Some(index)
@@ -152,7 +152,8 @@ mod tests {
 
     #[test]
     fn select_frame_ignores_the_stale_selected_report() {
-        // On the SET_SELECTED frame imgui still reports the previously selected tab as selected.
+        // On the SET_SELECTED frame imgui still reports the tab selected before this frame as
+        // selected.
         assert_eq!(clicked_focus(true, 1, 0, true), None);
         assert_eq!(clicked_focus(true, 1, 1, true), None);
         assert_eq!(clicked_focus(true, 0, 1, true), None);

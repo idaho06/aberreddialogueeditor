@@ -1,3 +1,10 @@
+//! The editor scene: [`gui()`] draws the whole editor UI on the render thread each frame;
+//! [`enter`] prepares the scene's resources and input bindings once on the logic thread.
+//!
+//! The modules share state only through `AppState` handles: the workspace mutex is taken in
+//! short snapshots and never held across imgui widget calls, and every user intent is an
+//! [`actions::EditorAction`] applied in one place, [`actions::apply_action`].
+
 mod actions;
 mod context_menu;
 mod gui;

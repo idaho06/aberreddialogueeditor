@@ -1,5 +1,5 @@
 //! The main menu bar. Menu items produce [`EditorAction`]s (applied later by
-//! [`crate::scenes::editor::gui`]): the File items, Edit > "Add node", View > "Re-layout",
+//! [`crate::scenes::editor::gui()`]): the File items, Edit > "Add node", View > "Re-layout",
 //! "Frame all" (both enabled only with an active doc), View > "Problems" (a check-marked toggle,
 //! always enabled) and Help > "Controls" / "About..." (always enabled).
 
@@ -54,7 +54,7 @@ pub fn draw(
         }
     });
     ui.menu("Edit", || {
-        // Enabled only with an active doc; the viewport is imgui's display size (== render size).
+        // The viewport is imgui's display size (== the render size).
         if item(ui, "Add node", "", active.is_some()) {
             actions.push(EditorAction::AddNode {
                 viewport: super::display_viewport(ui),
@@ -62,7 +62,7 @@ pub fn draw(
         }
     });
     ui.menu("View", || {
-        // Enabled only with an active doc; the viewport is imgui's display size (== render size).
+        // The viewport is imgui's display size (== the render size).
         if item(ui, "Re-layout", "", active.is_some()) {
             actions.push(EditorAction::Relayout {
                 viewport: super::display_viewport(ui),

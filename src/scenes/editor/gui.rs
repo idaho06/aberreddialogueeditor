@@ -1,3 +1,11 @@
+//! The editor scene's frame callback (render thread): draws the whole UI and applies the queued
+//! [`actions::EditorAction`]s in one place.
+//!
+//! The engine does not mask input for scene GUIs, so the capture flags are published into the
+//! shared `UiCapture` atomics every frame; the workspace mutex is never held across imgui widget
+//! calls — each action runs under a short lock with `app_state: None` and the returned dialog
+//! request is dispatched after the guard drops.
+
 use std::sync::atomic::Ordering;
 
 use aberredengine::prelude::*;
@@ -41,7 +49,7 @@ pub fn gui(ctx: &mut GuiCtx) {
     // imgui modals block mouse input to other windows, but `ui.is_key_pressed` is io-level and
     // still fires while a modal is open, so shortcuts are NOT polled on a modal frame — otherwise
     // e.g. Ctrl+W or Ctrl+Shift+S would act behind the unsaved-changes confirm. Menu, tabs,
-    // windows and the modals themselves are drawn exactly as before, in the same order.
+    // windows and the modals themselves are still drawn, in the same order.
     if !has_modal {
         shortcuts::poll(ctx, active, &mut action_queue);
     }
@@ -57,9 +65,9 @@ pub fn gui(ctx: &mut GuiCtx) {
         return;
     }
     // While a native dialog is in flight, tab closes are ignored: one dialog at a time, so a
-    // close and a dialog result never interleave. (The pending Save As itself is keyed by the
-    // doc's doc_id, so a tab closed meanwhile could no longer redirect the save — the skip
-    // stays.) Open/Save As requests are already ignored inside `request_async_dialog`.
+    // close and a dialog result never interleave. (The pending Save As is keyed by the doc's
+    // doc_id, so a tab closed while the picker is open cannot redirect the save either.)
+    // Open/Save As requests are already ignored inside `request_async_dialog`.
     let dialog_busy = dialog_in_flight(ctx.app_state);
     for action in action_queue {
         if dialog_busy && matches!(action, actions::EditorAction::CloseTab(_)) {

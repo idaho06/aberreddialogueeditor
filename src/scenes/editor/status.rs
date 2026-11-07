@@ -64,8 +64,7 @@ pub fn file_text(path: Option<&Path>, dirty: bool) -> String {
     if dirty { format!("{base}*") } else { base }
 }
 
-/// The problems part: "E errors / W warnings" (pluralised), coloured by
-/// [`header_color`](super::problems::header_color).
+/// The problems part: "E errors / W warnings" (pluralised), coloured by [`header_color`].
 pub fn problems_text(errors: usize, warnings: usize) -> String {
     format!(
         "{} / {}",
