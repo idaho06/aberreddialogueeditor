@@ -27,7 +27,9 @@ pub enum EditorAction {
     Open,
     /// File > Save / Ctrl+S: save the active doc (to its path, or Save As when untitled).
     Save,
-    /// File > Save As... / Ctrl+Shift+S: open the native save dialog for the active doc.
+    /// File > Save As... / Ctrl+Shift+S: open the native save dialog for the active doc — but
+    /// only after the save pre-check (`ops::check_saveable`) passes; a rejected doc pushes a
+    /// SaveRejected notification and no dialog is requested.
     SaveAs,
     /// File > Close Tab / Ctrl+W / tab close button: close the doc at the given index.
     CloseTab(usize),
@@ -145,7 +147,7 @@ fn save_active(ws: &mut Workspace, fx: &mut ActionEffects, app_state: Option<&Ap
                 "action {:?}: active doc has no path, falling back to Save As",
                 EditorAction::Save
             );
-            request_save_as(fx, app_state, ws);
+            request_save_as(fx, app_state, ws, EditorAction::Save);
         }
     }
 }
@@ -195,7 +197,7 @@ pub fn apply_action(
             request_dialog(&mut fx, app_state, AsyncFileDialogRequest::OpenDialogue);
         }
         EditorAction::Save => save_active(ws, &mut fx, app_state),
-        EditorAction::SaveAs => request_save_as(&mut fx, app_state, ws),
+        EditorAction::SaveAs => request_save_as(&mut fx, app_state, ws, EditorAction::SaveAs),
         EditorAction::CloseTab(index) => {
             if close_tab(ws, index, app_state).is_some() {
                 return fx;
@@ -286,24 +288,43 @@ fn request_dialog(
     }
 }
 
-/// Requests the Save As dialog for the active doc; a no-op when no doc is open.
-fn request_save_as(fx: &mut ActionEffects, app_state: Option<&AppState>, ws: &Workspace) {
-    if ws.active_doc().is_some() {
-        request_dialog(
-            fx,
-            app_state,
-            AsyncFileDialogRequest::SaveDialogueAs {
-                doc_index: ws.active,
-            },
+/// The Save As arm: runs the save pre-check ([`ops::check_saveable`], the same predicate and
+/// message `ops::save_doc` enforces) BEFORE any native picker opens — a doc the engine would
+/// reject pushes a SaveRejected notification onto `ws.notifications` and requests no dialog.
+/// No active doc: no-op (no dialog, no notification).
+fn request_save_as(
+    fx: &mut ActionEffects,
+    app_state: Option<&AppState>,
+    ws: &mut Workspace,
+    action: EditorAction,
+) {
+    let gate = ws.active_doc().map(ops::check_saveable);
+    let Some(result) = gate else {
+        return;
+    };
+    if let Err(err) = result {
+        log::debug!(
+            "action {action:?}: save pre-check rejected the active doc, no dialog requested"
         );
+        ws.notifications.push(ops::error_notification(&err));
+        return;
     }
+    request_dialog(
+        fx,
+        app_state,
+        AsyncFileDialogRequest::SaveDialogueAs {
+            doc_index: ws.active,
+        },
+    );
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::model::{CamState, Link, Outputs};
-    use crate::scenes::editor::testkit::{TempDir, fixture, ws_with_two_linked_nodes};
+    use crate::model::{CamState, Link, NotificationKind, Outputs};
+    use crate::scenes::editor::testkit::{
+        TempDir, fixture, ws_with_duplicate_id_doc, ws_with_two_linked_nodes,
+    };
     use aberredengine::prelude::Vec2;
 
     /// A workspace with one valid dirty doc (one node, so the engine gate passes).
@@ -392,18 +413,81 @@ mod tests {
     fn save_as_queues_the_save_dialog_for_the_active_doc() {
         let mut ws = ws_with_dirty_valid_doc();
         ops::new_doc(&mut ws); // active doc is now index 1
+        // An empty new doc has no start and would be rejected up front: make it valid.
+        ws.active_doc_mut().unwrap().add_node(Vec2::ZERO);
         let fx = apply_action(&mut ws, EditorAction::SaveAs, None);
         assert!(matches!(
             fx.dialog,
             Some(AsyncFileDialogRequest::SaveDialogueAs { doc_index: 1 })
         ));
+        assert!(ws.notifications.is_empty(), "a passing pre-check is silent");
+    }
+
+    #[test]
+    fn save_as_on_a_valid_doc_still_queues_the_dialog() {
+        let mut ws = ws_with_dirty_valid_doc();
+        let fx = apply_action(&mut ws, EditorAction::SaveAs, None);
+        assert!(matches!(
+            fx.dialog,
+            Some(AsyncFileDialogRequest::SaveDialogueAs { doc_index: 0 })
+        ));
+        assert!(ws.notifications.is_empty());
+    }
+
+    #[test]
+    fn save_as_on_an_invalid_doc_requests_no_dialog_and_pushes_one_save_rejected() {
+        let mut ws = ws_with_duplicate_id_doc();
+        let expected = match ops::check_saveable(ws.active_doc().unwrap()) {
+            Err(ops::OpError::Invalid(msg)) => msg,
+            other => panic!("expected Invalid, got {other:?}"),
+        };
+        let fx = apply_action(&mut ws, EditorAction::SaveAs, None);
+        assert!(
+            fx.dialog.is_none(),
+            "no picker for a doc the engine would reject"
+        );
+        assert!(!fx.quit);
+        assert_eq!(ws.notifications.len(), 1, "exactly one notification");
+        let note = &ws.notifications[0];
+        assert_eq!(note.kind, NotificationKind::SaveRejected);
+        assert_eq!(
+            note.message, expected,
+            "the notification carries the engine's own message, like save_doc's rejection"
+        );
+        assert!(
+            note.message.contains("duplicate dialogue node id"),
+            "the engine's message: {}",
+            note.message
+        );
+    }
+
+    #[test]
+    fn save_as_on_a_brand_new_empty_doc_is_rejected_before_the_dialog() {
+        let mut ws = Workspace::default();
+        ops::new_doc(&mut ws); // empty doc: no start node, the engine gate rejects it
+        let fx = apply_action(&mut ws, EditorAction::SaveAs, None);
+        assert!(fx.dialog.is_none() && !fx.quit);
+        assert_eq!(ws.notifications.len(), 1);
+        let note = &ws.notifications[0];
+        assert_eq!(note.kind, NotificationKind::SaveRejected);
+        assert!(
+            note.message.contains("is not among the defined nodes"),
+            "the engine's no-start message: {}",
+            note.message
+        );
     }
 
     #[test]
     fn save_as_without_an_active_doc_does_nothing() {
         let mut ws = Workspace::default();
-        let fx = apply_action(&mut ws, EditorAction::SaveAs, None);
-        assert!(fx.dialog.is_none() && !fx.quit);
+        for action in [EditorAction::SaveAs, EditorAction::Save] {
+            let fx = apply_action(&mut ws, action, None);
+            assert!(fx.dialog.is_none() && !fx.quit, "{action:?}");
+            assert!(
+                ws.notifications.is_empty(),
+                "{action:?}: no active doc, no notification"
+            );
+        }
     }
 
     #[test]
@@ -415,7 +499,28 @@ mod tests {
             fx.dialog,
             Some(AsyncFileDialogRequest::SaveDialogueAs { doc_index: 0 })
         ));
+        assert!(ws.notifications.is_empty());
         assert!(ws.docs.len() == 1 && ws.active_doc().unwrap().dirty);
+    }
+
+    #[test]
+    fn save_on_an_untitled_invalid_doc_behaves_like_save_as_no_dialog_one_notification() {
+        let mut ws = ws_with_duplicate_id_doc();
+        assert!(ws.active_doc().unwrap().path.is_none(), "untitled");
+        let fx = apply_action(&mut ws, EditorAction::Save, None);
+        assert!(
+            fx.dialog.is_none() && !fx.quit,
+            "Save on an untitled rejected doc must not open a picker"
+        );
+        assert_eq!(ws.notifications.len(), 1, "exactly one notification");
+        let note = &ws.notifications[0];
+        assert_eq!(note.kind, NotificationKind::SaveRejected);
+        assert!(
+            note.message.contains("duplicate dialogue node id"),
+            "the engine's message: {}",
+            note.message
+        );
+        assert!(ws.active_doc().unwrap().dirty, "nothing was saved");
     }
 
     #[test]

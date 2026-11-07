@@ -101,6 +101,11 @@ Full detail in `docs/gotchas.md`. The rules that prevent bugs:
   existing tab (`Focused` never re-layouts; `Opened` runs `auto_layout`).
 - `save_doc` runs `engine_gate` first (a rejected doc writes nothing, not even a `.tmp`) and saves atomically
   via `<path>.tmp` + rename: `serde_json::to_string_pretty(&to_def(doc))` + trailing newline.
+- `check_saveable` is the pre-check run BEFORE any Save As dialog opens (and by the close modal's Save on an
+  untitled doc): the same predicate and message as `save_doc`'s gate (`engine_gate` mapped to
+  `OpError::Invalid`), so it can never disagree with the real save. Pure — it mutates nothing and writes
+  nothing; a rejection pushes a `SaveRejected` notification instead of opening the picker. The final gate
+  inside `save_doc`/the Save As result path stays (the doc can be edited while the picker is open).
 - Doc paths are stored canonical/absolute by `open_path`/`save_doc`; `doc_title` is the file name or "Untitled".
 
 ## Graph
@@ -158,6 +163,9 @@ Full detail in `docs/gotchas.md`. The rules that prevent bugs:
   dialog requests go through its `Option<&AppState>` parameter — the GUI passes `None` under the lock and
   dispatches the returned request after). `gui.rs` collects the frame's actions and applies them; while a
   native dialog is in flight, `CloseTab` actions are skipped (a pending Save As is applied by tab index).
+  Save As — and Save on an untitled doc, which falls back to Save As — runs `ops::check_saveable` first: a
+  doc the engine would reject pushes a SaveRejected notification and `fx.dialog` stays `None`, so no picker
+  opens.
 - Lock discipline: lock `WorkspaceMutex` only for short snapshots and per action, never while calling
   `request_async_dialog`/`dialog_in_flight` or any rfd code; widgets are drawn with the guard dropped.
 - Shortcuts (`shortcuts.rs`) are read with `ui.is_key_pressed(Key::..)` + `io().key_ctrl`/`key_shift`, only when

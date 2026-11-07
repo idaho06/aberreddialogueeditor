@@ -130,7 +130,10 @@ at debug — events only.
 status bar → context menu → modals. Menu/shortcut/tab/context-menu/problem-row intents are collected as
 `EditorAction`s and applied in ONE place, `actions::apply_action(ws, action, None)` under a short lock (native
 dialog requests come back in `ActionEffects::dialog` and are dispatched after the guard drops; `fx.quit` calls
-`intents.request_quit()`). While a native dialog is in flight, `CloseTab` actions are skipped.
+`intents.request_quit()`). While a native dialog is in flight, `CloseTab` actions are skipped. Save As — and
+Save on an untitled doc, which falls back to it, plus the close modal's Save on an untitled doc — is pre-checked
+with `ops::check_saveable` before any picker is requested: a doc the engine would reject pushes a SaveRejected
+notification and no dialog is requested.
 
 - `EditorAction` (actions.rs): `New/Open/Save/SaveAs/CloseTab/Quit`, `FrameAll{viewport}` / `Relayout{viewport}`
   / `AddNode{viewport}` / `AddNodeAt(Vec2)` (viewport = `ui.io().display_size`, read by the producer),
@@ -155,7 +158,10 @@ when matching an already-open file (any spelling focuses the existing tab; `Focu
 `serde_json::from_str::<DialogueDef>`, runs `auto_layout`, pushes and activates the doc. `save_doc` runs
 `engine_gate` FIRST (a rejected doc writes nothing, not even a `.tmp`), then writes
 `serde_json::to_string_pretty(&to_def(doc))` + `\n` atomically via `<path>.tmp` + rename, sets the canonical
-path and `mark_clean`. `save_doc_at` adds a tab-collision check (`AlreadyOpen`). `error_notification` maps
+path and `mark_clean`. `check_saveable` is the pre-check used before any Save As picker opens (the close
+modal's Save on an untitled doc uses it too): the same gate and message as `save_doc` (`engine_gate` mapped to
+`OpError::Invalid`) — pure, it mutates nothing and writes nothing. `save_doc_at` adds a tab-collision check
+(`AlreadyOpen`). `error_notification` maps
 `OpError::Invalid` to a `SaveRejected` notification (engine message only) and everything else to `Error`.
 Doc paths are stored canonical/absolute; `doc_title` is the file name or "Untitled".
 
@@ -175,7 +181,7 @@ applies it through the pure `apply_result`, pushing failures into `Workspace.not
 | `src/model/convert.rs` | `from_def` (tolerant) / `to_def` (total, exact) against the engine's `DialogueDef` — load/save only |
 | `src/model/lint.rs` | `Severity`/`ProblemKind`/`Problem`, `lint` (all problems, deterministic order), `engine_gate` (`DialogueTree::try_from(to_def(doc))`) |
 | `src/model/notify.rs` | `Notification`/`NotificationKind` (`Error`, `SaveRejected`) queue entries for the GUI modal |
-| `src/ops/mod.rs` | `open_path`/`save_doc`/`save_doc_at`/`new_doc`/`close_doc`/`doc_title`, `OpenOutcome`, `OpError`, `error_notification` |
+| `src/ops/mod.rs` | `open_path`/`check_saveable`/`save_doc`/`save_doc_at`/`new_doc`/`close_doc`/`doc_title`, `OpenOutcome`, `OpError`, `error_notification` |
 | `src/graph/mod.rs` | Graph module wiring, re-exports, `#[cfg(test)] fixtures` helper (fixture JSON + laid-out guard doc) |
 | `src/graph/style.rs` | Numeric constants (node/pin/row/gap sizes, edge/outline thickness, `FONT`), palette, Z indices |
 | `src/graph/geometry.rs` | `rows`/`node_height`/`node_rect`, `input_pin`/`output_pin`/`slot_at`, `hit_test`, `edge_curve`, `arrow_tip_dir`, `graph_bounds` |

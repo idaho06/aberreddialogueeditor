@@ -114,15 +114,23 @@ pub fn open_path(ws: &mut Workspace, path: &Path) -> Result<OpenOutcome, OpError
     Ok(OpenOutcome::Opened { warnings })
 }
 
+/// The save pre-check: the engine save gate ([`engine_gate`]) mapped to [`OpError::Invalid`] with
+/// the engine's own message — the SAME predicate and message [`save_doc`] enforces, so the two can
+/// never disagree. Pure: it does not mutate the doc and writes nothing. Run it BEFORE opening a
+/// Save As picker, so a doc the engine would reject never reaches the dialog.
+pub fn check_saveable(doc: &DialogueDoc) -> Result<(), OpError> {
+    engine_gate(doc).map_err(|err| OpError::Invalid(err.to_string()))
+}
+
 /// Saves `doc` to `path` as pretty-printed `DialogueDef` JSON plus a trailing newline, atomically
-/// (write `<path>.tmp` in the same directory, then rename over `path`). The engine gate runs FIRST:
-/// on failure nothing is written — no file, no `.tmp`. On success the doc's `path` is set to the
-/// canonical path of the saved file and the doc is marked clean.
+/// (write `<path>.tmp` in the same directory, then rename over `path`). The engine gate runs FIRST
+/// (via [`check_saveable`]): on failure nothing is written — no file, no `.tmp`. On success the
+/// doc's `path` is set to the canonical path of the saved file and the doc is marked clean.
 pub fn save_doc(doc: &mut DialogueDoc, path: &Path) -> Result<(), OpError> {
     log::debug!("save_doc: target {}", path.display());
-    if let Err(err) = engine_gate(doc) {
+    if let Err(err) = check_saveable(doc) {
         log::warn!("save_doc: engine gate rejected {}: {err}", path.display());
-        return Err(OpError::Invalid(err.to_string()));
+        return Err(err);
     }
     let mut text = serde_json::to_string_pretty(&to_def(doc))
         .map_err(|err| OpError::Json(format!("cannot serialize {}: {err}", path.display())))?;
@@ -330,6 +338,66 @@ mod tests {
                 "{name}: no .tmp may be left behind"
             );
         }
+    }
+
+    #[test]
+    fn check_saveable_accepts_a_valid_doc_without_mutating_it() {
+        let mut ws = Workspace::default();
+        open_guard(&mut ws);
+        let (revision, content_revision, dirty) = {
+            let doc = ws.active_doc().unwrap();
+            (doc.revision, doc.content_revision, doc.dirty)
+        };
+        let before = to_def(ws.active_doc().unwrap());
+        check_saveable(ws.active_doc().unwrap()).expect("a valid doc passes the pre-check");
+        let doc = ws.active_doc().unwrap();
+        assert_eq!(
+            (doc.revision, doc.content_revision, doc.dirty),
+            (revision, content_revision, dirty),
+            "the pre-check does not mutate the doc"
+        );
+        assert_eq!(to_def(doc), before, "the doc's content is unchanged");
+    }
+
+    #[test]
+    fn check_saveable_rejects_invalid_docs_with_the_exact_error_save_doc_returns() {
+        let tmp = TempDir::new("ops", "check-saveable");
+        let cases: [(&str, &str); 2] = [
+            ("invalid_dup_id.json", "duplicate dialogue node id"),
+            ("invalid_no_start.json", "is not among the defined nodes"),
+        ];
+        for (i, &(name, needle)) in cases.iter().enumerate() {
+            let mut ws = Workspace::default();
+            open_path(&mut ws, &fixture(name))
+                .expect("invalid fixtures still open: from_def is tolerant");
+            let out = tmp.join(&format!("out-{i}.json"));
+            let pre = check_saveable(ws.active_doc().unwrap())
+                .expect_err("the pre-check rejects the invalid doc");
+            assert!(
+                matches!(&pre, OpError::Invalid(_)),
+                "{name}: expected OpError::Invalid, got {pre}"
+            );
+            assert_err_contains(&pre, needle);
+            let save = save_doc(ws.active_doc_mut().unwrap(), &out)
+                .expect_err("save_doc rejects the same doc");
+            assert_eq!(
+                pre, save,
+                "{name}: the pre-check and save_doc return the identical error (same predicate and message)"
+            );
+            assert!(!out.exists(), "{name}: the rejected save wrote nothing");
+            assert!(
+                !tmp_sibling(&out).exists(),
+                "{name}: no .tmp may be left behind"
+            );
+        }
+
+        // A brand-new empty doc has no start node and is rejected as well.
+        let mut ws = Workspace::default();
+        new_doc(&mut ws);
+        let pre = check_saveable(ws.active_doc().unwrap())
+            .expect_err("an empty doc has no start, the pre-check rejects it");
+        assert!(matches!(&pre, OpError::Invalid(_)), "got {pre}");
+        assert_err_contains(&pre, "is not among the defined nodes");
     }
 
     #[test]

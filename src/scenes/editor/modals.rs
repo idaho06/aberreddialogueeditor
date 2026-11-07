@@ -6,7 +6,8 @@
 //!
 //! Locking: the workspace is locked to snapshot the modal state, the guard is dropped while
 //! the widgets are drawn, and a button click is applied with a fresh short lock. The Save As
-//! dialog request (untitled doc in the close modal) happens after that lock is released.
+//! dialog request (untitled doc in the close modal, after its save pre-check passes) happens
+//! after that lock is released.
 
 use aberredengine::prelude::imgui::Ui;
 use aberredengine::prelude::*;
@@ -209,8 +210,18 @@ fn apply_choice_ws(ws: &mut Workspace, choice: ModalChoice) -> ChoiceEffect {
                     }
                 },
                 None => {
-                    // Untitled doc: hand over to the Save As dialog and keep the tab open.
+                    // Untitled doc: run the save pre-check (the same gate/message save_doc
+                    // enforces) BEFORE handing over to the Save As dialog, so a doc the engine
+                    // would reject never opens a picker. The tab stays open.
                     ws.pending_close = None;
+                    let check = ops::check_saveable(&ws.docs[index]);
+                    if let Err(err) = check {
+                        log::debug!(
+                            "modal {choice:?}: save pre-check rejected the untitled doc, no dialog"
+                        );
+                        ws.notifications.push(ops::error_notification(&err));
+                        return ChoiceEffect::Nothing;
+                    }
                     log::debug!("modal {choice:?}: tab {index} is untitled, Save As dialog next");
                     return ChoiceEffect::SaveAsDialog { doc_index: index };
                 }
@@ -275,6 +286,67 @@ fn apply_choice(app_state: &AppState, choice: Option<ModalChoice>) -> bool {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::scenes::editor::testkit::{TempDir, fixture, ws_with_duplicate_id_doc};
+    use aberredengine::prelude::Vec2;
+
+    #[test]
+    fn close_save_on_an_untitled_invalid_doc_returns_nothing_and_queues_save_rejected() {
+        let mut ws = ws_with_duplicate_id_doc();
+        ws.pending_close = Some(0);
+        assert_eq!(
+            apply_choice_ws(&mut ws, ModalChoice::CloseSave),
+            ChoiceEffect::Nothing,
+            "no Save As dialog for a doc the engine would reject"
+        );
+        assert_eq!(ws.pending_close, None, "the pending close is cleared");
+        assert_eq!(ws.docs.len(), 1, "the tab stays open");
+        assert_eq!(ws.notifications.len(), 1, "exactly one notification");
+        let note = &ws.notifications[0];
+        assert_eq!(note.kind, NotificationKind::SaveRejected);
+        assert!(
+            note.message.contains("duplicate dialogue node id"),
+            "the engine's message: {}",
+            note.message
+        );
+    }
+
+    #[test]
+    fn close_save_on_an_untitled_valid_doc_returns_the_save_as_dialog() {
+        let mut ws = Workspace::default();
+        ops::new_doc(&mut ws);
+        ws.active_doc_mut().unwrap().add_node(Vec2::ZERO); // one node = start: valid
+        ws.pending_close = Some(0);
+        assert_eq!(
+            apply_choice_ws(&mut ws, ModalChoice::CloseSave),
+            ChoiceEffect::SaveAsDialog { doc_index: 0 }
+        );
+        assert_eq!(ws.pending_close, None);
+        assert!(ws.notifications.is_empty(), "a passing pre-check is silent");
+        assert_eq!(
+            ws.docs.len(),
+            1,
+            "the tab stays open until the save completes"
+        );
+    }
+
+    #[test]
+    fn close_save_on_a_doc_with_a_path_saves_then_closes_as_before() {
+        let tmp = TempDir::new("modals", "close-save-path");
+        let mut ws = Workspace::default();
+        ops::open_path(&mut ws, &fixture("guard.json")).expect("guard.json opens");
+        ws.active_doc_mut().unwrap().add_node(Vec2::ZERO); // dirty
+        let out = tmp.join("out.json");
+        ws.active_doc_mut().unwrap().path = Some(out.clone());
+        ws.pending_close = Some(0);
+        assert_eq!(
+            apply_choice_ws(&mut ws, ModalChoice::CloseSave),
+            ChoiceEffect::Nothing
+        );
+        assert!(ws.docs.is_empty(), "the saved tab closed");
+        assert_eq!(ws.pending_close, None);
+        assert!(ws.notifications.is_empty(), "a good save is silent");
+        assert!(out.exists(), "the file was written");
+    }
 
     #[test]
     fn modal_title_is_error_for_plain_errors_and_cannot_save_for_save_rejected() {

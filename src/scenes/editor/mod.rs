@@ -65,6 +65,21 @@ pub(crate) mod testkit {
         (ws, a, b)
     }
 
+    /// A workspace with one UNTITLED doc holding two nodes with the SAME id (a duplicate id:
+    /// the engine save gate rejects the doc).
+    pub fn ws_with_duplicate_id_doc() -> Workspace {
+        let mut ws = Workspace::default();
+        ops::new_doc(&mut ws);
+        {
+            let doc = ws.active_doc_mut().unwrap();
+            let a = doc.add_node(Vec2::ZERO);
+            let b = doc.add_node(Vec2::new(100.0, 0.0));
+            let id = doc.node(a).unwrap().id.clone();
+            doc.rename_node(b, id);
+        }
+        ws
+    }
+
     /// A unique temp directory per test, removed on drop. `scope` keeps same-named directories
     /// of different test modules from colliding inside one test process.
     pub struct TempDir(PathBuf);
