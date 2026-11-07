@@ -5,7 +5,7 @@ version = 4
 [[package]]
 name = "aberred-audio"
 version = "0.2.0"
-source = "git+https://github.com/idaho06/aberredengine.git?branch=develop-0.2.0#0547e57b2170d3ba9e3ed2eb9367913815d9c761"
+source = "git+https://github.com/idaho06/aberredengine.git?rev=0547e57b2170d3ba9e3ed2eb9367913815d9c761#0547e57b2170d3ba9e3ed2eb9367913815d9c761"
 dependencies = [
  "aberred-core",
  "bevy_ecs",
@@ -18,7 +18,7 @@ dependencies = [
 [[package]]
 name = "aberred-core"
 version = "0.2.0"
-source = "git+https://github.com/idaho06/aberredengine.git?branch=develop-0.2.0#0547e57b2170d3ba9e3ed2eb9367913815d9c761"
+source = "git+https://github.com/idaho06/aberredengine.git?rev=0547e57b2170d3ba9e3ed2eb9367913815d9c761#0547e57b2170d3ba9e3ed2eb9367913815d9c761"
 dependencies = [
  "arrayvec",
  "bevy_ecs",
@@ -41,7 +41,7 @@ dependencies = [
 [[package]]
 name = "aberred-render"
 version = "0.2.0"
-source = "git+https://github.com/idaho06/aberredengine.git?branch=develop-0.2.0#0547e57b2170d3ba9e3ed2eb9367913815d9c761"
+source = "git+https://github.com/idaho06/aberredengine.git?rev=0547e57b2170d3ba9e3ed2eb9367913815d9c761#0547e57b2170d3ba9e3ed2eb9367913815d9c761"
 dependencies = [
  "aberred-core",
  "bevy_ecs",
@@ -53,7 +53,7 @@ dependencies = [
 
 [[package]]
 name = "aberreddialogueeditor"
-version = "0.1.0"
+version = "0.2.0"
 dependencies = [
  "aberredengine",
  "crossbeam-channel",
@@ -69,7 +69,7 @@ dependencies = [
 [[package]]
 name = "aberredengine"
 version = "0.2.0"
-source = "git+https://github.com/idaho06/aberredengine.git?branch=develop-0.2.0#0547e57b2170d3ba9e3ed2eb9367913815d9c761"
+source = "git+https://github.com/idaho06/aberredengine.git?rev=0547e57b2170d3ba9e3ed2eb9367913815d9c761#0547e57b2170d3ba9e3ed2eb9367913815d9c761"
 dependencies = [
  "aberred-audio",
  "aberred-core",

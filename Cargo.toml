@@ -1,10 +1,19 @@
 [package]
 name = "aberreddialogueeditor"
-version = "0.1.0"
+version = "0.2.0"
 edition = "2024"
+description = "Node-graph editor for AberredEngine dialogue JSON"
+authors = ["César Rodríguez (Idaho06)"]
+license = "MIT"
+repository = "https://github.com/idaho06/aberreddialogueeditor"
+readme = "README.md"
+keywords = ["dialogue", "editor", "node-graph", "gamedev", "aberredengine"]
+categories = ["game-development"]
+# Depends on a git revision of the engine, so it cannot go to crates.io.
+publish = false
 
 [dependencies]
-aberredengine = { git = "https://github.com/idaho06/aberredengine.git", branch = "develop-0.2.0", default-features = false }
+aberredengine = { git = "https://github.com/idaho06/aberredengine.git", rev = "0547e57b2170d3ba9e3ed2eb9367913815d9c761", default-features = false }
 log = "0.4"
 env_logger = "0.11"
 serde = { version = "1", features = ["derive"] }
