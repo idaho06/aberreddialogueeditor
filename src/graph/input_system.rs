@@ -12,14 +12,16 @@ use super::camera::screen_to_world;
 use super::interaction::{GraphInteraction, InputSample};
 use crate::model::CamState;
 
-/// Logic-side graph input state, inserted at editor scene enter: the pure interaction state
-/// machine's memory, the drag-preview endpoints `(from_pin_world, mouse_world)` read by the
-/// preview system, and the doc the interaction belongs to (a gesture never survives a tab
-/// switch, so the frame system resets the interaction when `last_doc_id` changes).
+/// Logic-side graph input state, inserted at editor scene enter.
 #[derive(Resource, Debug, Default)]
 pub struct GraphInput {
+    /// The pure interaction state machine's memory between ticks.
     pub interaction: GraphInteraction,
+    /// The drag-preview endpoints `(from_pin_world, mouse_world)` while a link is dragged,
+    /// read by the preview system.
     pub preview: Option<(Vec2, Vec2)>,
+    /// The doc the interaction belongs to; the frame system resets the interaction when this
+    /// changes (a gesture never survives a tab switch).
     pub last_doc_id: u64,
 }
 

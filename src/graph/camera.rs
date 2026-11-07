@@ -6,8 +6,9 @@ use aberredengine::prelude::Vec2;
 
 use crate::model::CamState;
 
-/// Zoom limits for interactive zooming.
+/// Minimum interactive zoom.
 pub const MIN_ZOOM: f32 = 0.1;
+/// Maximum interactive zoom.
 pub const MAX_ZOOM: f32 = 4.0;
 
 /// Zoom cap for [`frame_all`]: small graphs are not magnified.
@@ -18,15 +19,15 @@ pub fn screen_to_world(cam: &CamState, viewport: Vec2, p: Vec2) -> Vec2 {
     (p - viewport / 2.0) / cam.zoom + cam.target
 }
 
-/// Screen pixel at which world point `w` is shown (inverse of [`screen_to_world`]).
-/// Used only by the round-trip tests below (and `graph/frame.rs`'s tests).
+/// Screen pixel at which world point `w` is shown (inverse of [`screen_to_world`]). Test-only:
+/// used by the round-trip tests below and `graph/frame.rs`'s tests.
 #[cfg(test)]
 pub fn world_to_screen(cam: &CamState, viewport: Vec2, w: Vec2) -> Vec2 {
     (w - cam.target) * cam.zoom + viewport / 2.0
 }
 
 /// Zooms by `factor` around the screen cursor: the world point under `cursor_screen` stays
-/// under it. The new zoom is clamped to `[MIN_ZOOM, MAX_ZOOM]`.
+/// under it. The zoom is clamped to `[MIN_ZOOM, MAX_ZOOM]`.
 pub fn zoom_at(cam: &CamState, viewport: Vec2, cursor_screen: Vec2, factor: f32) -> CamState {
     let zoom = (cam.zoom * factor).clamp(MIN_ZOOM, MAX_ZOOM);
     let world = screen_to_world(cam, viewport, cursor_screen);

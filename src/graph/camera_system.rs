@@ -1,9 +1,10 @@
 //! ECS camera+input system for the graph view: `graph_frame_system` (registered with `add_system`,
 //! runs in Update) makes `MainCamera` follow the ACTIVE doc's [`CamState`] every tick, applies
 //! wheel zoom and middle-mouse panning to it, then feeds the mouse through the pure interaction
-//! state machine ([`step`]) and applies the returned [`Action`]s to the doc ([`apply_actions`]).
-//! The camera write lives in the plain function [`camera_update`]; the input math lives in the
-//! pure, unit-tested helpers [`apply_wheel`], [`pan_step`] and [`build_sample`].
+//! state machine ([`step`]) and applies the returned [`Action`](super::interaction::Action)s to
+//! the doc ([`apply_actions`]). The camera write lives in the plain function [`camera_update`];
+//! the input math lives in the pure, unit-tested helpers [`apply_wheel`], [`pan_step`] and
+//! [`build_sample`].
 //!
 //! Lock discipline: the workspace is locked ONCE per tick, briefly, for the whole frame step —
 //! camera zoom/pan, sample building, `step`/`apply_actions` and the pending-request store all
@@ -30,11 +31,11 @@ pub fn apply_wheel(cam: &CamState, viewport: Vec2, cursor: Vec2, scroll_y: f32) 
     zoom_at(cam, viewport, cursor, WHEEL_ZOOM_BASE.powf(scroll_y))
 }
 
-/// One pan step. `prev` is the mouse position stored on the previous tick (`None` when no pan is in
-/// progress), `now` the current screen-pixel position, `held` whether the pan button is held. On the
-/// press tick (`prev == None`) only the position is stored — no movement. While held, the screen-pixel
-/// delta since `prev` pans via [`pan_by_screen_delta`]. On release (`held == false`) the gesture resets
-/// to `None`. Pure.
+/// One pan step. `prev` is the mouse position stored on the previous tick (`None` when no pan
+/// is in progress), the second argument the screen-pixel position of the current tick, `held`
+/// whether the pan button is held. On the press tick (`prev == None`) only the position is
+/// stored — no movement. While held, the screen-pixel delta since `prev` pans via
+/// [`pan_by_screen_delta`]. On release (`held == false`) the gesture resets to `None`. Pure.
 pub fn pan_step(
     prev: Option<Vec2>,
     now: Vec2,
@@ -50,8 +51,8 @@ pub fn pan_step(
     (Some(now), pan_by_screen_delta(cam, now - prev))
 }
 
-/// Writes the doc camera into the `MainCamera` resource: the world point `cam.target` is shown at the
-/// screen centre (`offset = viewport / 2`) with `cam.zoom`.
+/// Writes the doc camera into the `MainCamera` resource: the world point `cam.target` is shown
+/// at the screen centre (`offset = viewport / 2`) with `cam.zoom`.
 pub fn camera_update(camera: &mut MainCamera, viewport: Vec2, cam: CamState) {
     camera.0 = Camera2D::new(cam.target, viewport / 2.0).with_zoom(cam.zoom);
 }
@@ -120,6 +121,8 @@ pub fn graph_frame_system(
     // AFTER (a) — `input.mouse_world_*` would use the camera from before this tick's systems.
     let mouse_screen = Vec2::new(input.mouse_x, input.mouse_y);
     let left = input.mouse_left_button;
+    // The editor scene rebinds Action2 to the right mouse button only (its default is Enter OR
+    // right mouse), so Action2 is the right-button state here.
     let right = input.action(InputAction::Action2);
     let sample = build_sample(
         mouse_screen,

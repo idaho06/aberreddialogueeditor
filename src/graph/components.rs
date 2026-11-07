@@ -1,8 +1,7 @@
-//! ECS markers and projection bookkeeping for the graph view.
-//!
-//! This is the ONLY file of the graph module that imports ECS types: `Component`, `Resource`
-//! and `Entity` come from `aberredengine::prelude` (the `bevy_ecs` re-export). Everything
-//! else in `src/graph` stays pure.
+//! ECS markers and projection bookkeeping for the graph view. `Component`, `Resource` and
+//! `Entity` come from `aberredengine::prelude` (the `bevy_ecs` re-export). The only other graph
+//! files with ECS imports are `input_system.rs`, `camera_system.rs`, `projection.rs` and
+//! `preview.rs`; the remaining files import at most `Vec2` and `Color` from the engine.
 
 // The `Component`/`Resource` derive macros expand to `bevy_ecs::...` paths; this crate does not
 // depend on `bevy_ecs` directly, so the facade's re-export brings the name into scope.

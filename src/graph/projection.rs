@@ -190,7 +190,6 @@ pub fn graph_projection_system(
         );
     }
 
-    // Edge lookups by key, built once per plan execution.
     let edge_by_key: FxHashMap<(NodeKey, Slot), &EdgeView> = snapshot
         .edges
         .iter()
@@ -252,7 +251,9 @@ pub fn graph_projection_system(
 }
 
 /// Spawns one node: a root entity at `view.pos` plus `GraphPart` children at local positions.
-/// Texts are dropped while font metrics are unavailable (`sig.metrics_ready == false`).
+/// The root itself gets NO `GlobalTransform2D` — only children are spawned WITH one (see
+/// [`child_global`]). Texts are dropped while font metrics are unavailable
+/// (`sig.metrics_ready == false`).
 fn spawn_node(
     commands: &mut Commands,
     ents: &mut GraphEntities,

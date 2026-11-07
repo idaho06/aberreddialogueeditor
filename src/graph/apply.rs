@@ -1,6 +1,6 @@
 //! Pure application of interaction [`Action`]s to a [`DialogueDoc`]: the input system runs the
-//! state machine ([`step`]) and hands the returned actions to [`apply_actions`], which maps each
-//! one onto the doc's named mutators (unknown nodes are no-ops there) and turns
+//! state machine ([`step`](super::step)) and hands the returned actions to [`apply_actions`],
+//! which maps each one onto the doc's named mutators (unknown nodes are no-ops there) and turns
 //! [`Action::OpenContextMenu`] into a [`ContextMenuRequest`] for the GUI. No ECS, no imgui —
 //! only `Vec2` from the engine prelude plus the model and the other pure graph modules.
 //!

@@ -42,9 +42,10 @@ pub enum Phase {
     Idle,
     /// Left-dragging a node body/input pin; `grab_offset` keeps the grab point fixed under the cursor.
     DraggingNode { key: NodeKey, grab_offset: Vec2 },
-    /// Left-dragging a link out of an output pin. A previously linked pin is NOT detached at
-    /// pickup — the detach (`SetLink .. End`) is deferred until the pointer actually leaves the
-    /// 4 px click radius, so a plain click mutates nothing.
+    /// Left-dragging a link out of an output pin. A pin that already has a link is NOT detached
+    /// at pickup — the detach (`SetLink .. End`) is deferred until the pointer actually leaves
+    /// the 4 px click radius, so a plain click mutates nothing (`set_link` marks the doc dirty
+    /// even when the value is unchanged).
     DraggingLink {
         from: NodeKey,
         slot: Slot,

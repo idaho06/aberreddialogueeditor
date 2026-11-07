@@ -35,6 +35,8 @@ pub struct NodeSig {
     pub is_start: bool,
     pub is_selected: bool,
     pub has_error: bool,
+    /// Font-metrics availability: part of the signature so that arriving metrics respawn the
+    /// node and add its texts.
     pub metrics_ready: bool,
 }
 

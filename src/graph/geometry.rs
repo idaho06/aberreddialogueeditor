@@ -82,8 +82,8 @@ pub fn hit_test(doc: &DialogueDoc, p: Vec2, pin_hit_radius: f32) -> Hit {
 }
 
 /// Cubic bezier control points for an edge, RELATIVE to `from` (`Shape::bezier` is local to
-/// its entity), plus the endpoint relative to `from`. Forward case (`to.x >= from.x + 20`)
-/// leaves horizontally; back/self case loops below both pins.
+/// its entity), plus the endpoint relative to `from`. Forward case (`to.x >= from.x +
+/// EDGE_FORWARD_DX`) leaves horizontally; back/self case loops below both pins.
 pub fn edge_curve(from: Vec2, to: Vec2) -> (Vec2, Vec2, Vec2) {
     let to_rel = to - from;
     if to.x >= from.x + EDGE_FORWARD_DX {
