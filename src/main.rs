@@ -4,6 +4,8 @@ mod ops;
 mod scenes;
 mod state;
 mod systems;
+#[cfg(test)]
+mod testkit;
 
 use aberredengine::prelude::*;
 

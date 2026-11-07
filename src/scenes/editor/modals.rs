@@ -298,7 +298,7 @@ fn apply_choice(app_state: &AppState, choice: Option<ModalChoice>) -> bool {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::scenes::editor::testkit::{TempDir, fixture, ws_with_duplicate_id_doc};
+    use crate::testkit::{TempDir, fixture, ws_with_duplicate_id_doc};
     use aberredengine::prelude::Vec2;
 
     #[test]

@@ -152,10 +152,10 @@ fn save_active(ws: &mut Workspace, fx: &mut ActionEffects, app_state: Option<&Ap
     }
 }
 
-/// The CloseTab arm. Returns `Some(())` when the action was IGNORED (a native dialog is in
-/// flight, or there is no doc at `index`) — the caller returns early without the applied log;
-/// returns `None` when it was applied.
-fn close_tab(ws: &mut Workspace, index: usize, app_state: Option<&AppState>) -> Option<()> {
+/// The CloseTab arm. Returns `true` when the close was APPLIED and `false` when the action
+/// was IGNORED (a native dialog is in flight, or there is no doc at `index`) — the caller
+/// returns early without the applied log when it returns `false`.
+fn close_tab(ws: &mut Workspace, index: usize, app_state: Option<&AppState>) -> bool {
     let action = EditorAction::CloseTab(index);
     if app_state.is_some_and(dialog_in_flight) {
         log::debug!(
@@ -166,20 +166,20 @@ fn close_tab(ws: &mut Workspace, index: usize, app_state: Option<&AppState>) -> 
             ws.pending_close,
             ws.pending_quit
         );
-        return Some(());
+        return false;
     }
     let Some(dirty) = ws.docs.get(index).map(|doc| doc.dirty) else {
         log::debug!(
             "action {action:?} ignored: no doc at index {index} (docs={})",
             ws.docs.len()
         );
-        return Some(());
+        return false;
     };
     match close_decision(dirty) {
         CloseDecision::CloseNow => ops::close_doc(ws, index),
         CloseDecision::Confirm => ws.pending_close = Some(index),
     }
-    None
+    true
 }
 
 /// Applies one user intent to the workspace. Pure with respect to the GUI: the only engine
@@ -199,7 +199,7 @@ pub fn apply_action(
         EditorAction::Save => save_active(ws, &mut fx, app_state),
         EditorAction::SaveAs => request_save_as(&mut fx, app_state, ws, EditorAction::SaveAs),
         EditorAction::CloseTab(index) => {
-            if close_tab(ws, index, app_state).is_some() {
+            if !close_tab(ws, index, app_state) {
                 return fx;
             }
         }
@@ -325,9 +325,7 @@ fn request_save_as(
 mod tests {
     use super::*;
     use crate::model::{CamState, Link, NotificationKind, Outputs};
-    use crate::scenes::editor::testkit::{
-        TempDir, fixture, ws_with_duplicate_id_doc, ws_with_two_linked_nodes,
-    };
+    use crate::testkit::{TempDir, fixture, ws_with_duplicate_id_doc, ws_with_two_linked_nodes};
     use aberredengine::prelude::Vec2;
 
     /// A workspace with one valid dirty doc (one node, so the engine gate passes).

@@ -230,7 +230,7 @@ pub fn poll_async_dialogs(app_state: Res<AppState>) {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::scenes::editor::testkit::{TempDir, fixture};
+    use crate::testkit::{TempDir, fixture};
 
     fn open_guard_result() -> AsyncFileDialogResult {
         AsyncFileDialogResult::OpenDialogue {

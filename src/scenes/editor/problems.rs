@@ -239,8 +239,8 @@ pub fn draw(ctx: &mut GuiCtx, actions: &mut Vec<EditorAction>) {
 mod tests {
     use super::*;
     use crate::model::{DialogueDoc, ProblemKind, Workspace, from_def, lint};
-    use crate::scenes::editor::testkit::app_state_with;
     use crate::state::WorkspaceMutex;
+    use crate::testkit::app_state_with;
     use aberredengine::prelude::{DialogueDef, Vec2};
 
     fn prob(severity: Severity, kind: ProblemKind, node: Option<NodeKey>, msg: &str) -> Problem {

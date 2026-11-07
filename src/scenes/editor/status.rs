@@ -123,7 +123,7 @@ pub fn draw(ctx: &mut GuiCtx) {
 mod tests {
     use super::*;
     use crate::model::{DialogueDoc, Workspace};
-    use crate::scenes::editor::testkit::{app_state_with, ws_with_two_linked_nodes};
+    use crate::testkit::{app_state_with, ws_with_two_linked_nodes};
     use aberredengine::prelude::Vec2;
 
     #[test]

@@ -82,5 +82,5 @@ against this repo's `src/`.
 - **The lint cache is keyed on `content_revision`**, not `revision`: `doc.problems()` recomputes only when
   `content_revision` changed, so view-only changes (pos/select/camera) never re-run the linter.
 - **Do NOT run manual save tests on the repo fixtures.** `tests/fixtures/*.json` are loaded by the tests
-  (`include_str!` / `fixture(...)`); save tests must write to a temp dir (`testkit::TempDir`). In the app, use
+  (`include_str!` / `fixture(...)`); save tests must write to a temp dir (`crate::testkit::TempDir`). In the app, use
   Save As to a copy — never save over a fixture.

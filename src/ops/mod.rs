@@ -223,7 +223,7 @@ pub fn error_notification(err: &OpError) -> Notification {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::scenes::editor::testkit::{TempDir, fixture};
+    use crate::testkit::{TempDir, fixture};
     use aberredengine::prelude::{Vec2, load_dialogue};
 
     const GUARD_JSON: &str = include_str!(concat!(

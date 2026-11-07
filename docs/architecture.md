@@ -206,7 +206,7 @@ unsaved-changes modal's Save on an untitled doc).
 | `src/graph/frame.rs` | `frame_doc` (`set_camera(frame_all(graph_bounds(doc), viewport, 40.0))`) |
 | `src/graph/preview.rs` | `graph_preview_system` — the single `GraphPreview` drag-link entity |
 | `src/scenes/mod.rs` | `pub mod editor` |
-| `src/scenes/editor/mod.rs` | Editor module wiring, `gui`/`enter` re-exports, `display_viewport`, `#[cfg(test)] testkit` (`fixture`, `app_state_with`, `ws_with_two_linked_nodes`, `TempDir`) |
+| `src/scenes/editor/mod.rs` | Editor module wiring, `gui`/`enter` re-exports, `display_viewport` |
 | `src/scenes/editor/lifecycle.rs` | Scene enter: insert `MainCamera`, `GraphEntities`, `GraphInput`; disable camera follow; rebind `Action2` to right mouse only |
 | `src/scenes/editor/gui.rs` | The scene GUI callback: capture flags, panel draw order, `EditorAction` queue application |
 | `src/scenes/editor/menu.rs` | Main menu bar (File/Edit/View/Help) producing `EditorAction`s |
@@ -228,6 +228,7 @@ unsaved-changes modal's Save on an untitled doc).
 | `src/systems/setup.rs` | `on_setup` — inserts `UiCaptureHandle`, `WorkspaceMutex`, `AsyncFileDialogMutex` into `AppState` once |
 | `src/systems/file_dialogs.rs` | rfd bridge: `request_async_dialog`, `dialog_in_flight`, `drain_completed`, pure `apply_result` (Save As keyed by `doc_id`, `close_after` closes the doc after a successful save), `poll_async_dialogs` |
 | `src/systems/window_resize.rs` | `WindowResized` observer: `GameConfig::set_render_size` + re-centre the camera offset (mouse coords stay 1:1) |
+| `src/testkit.rs` | `#[cfg(test)]` shared test helpers used by the editor, ops and file-dialog tests: `fixture`, `app_state_with`, `ws_with_two_linked_nodes`, `ws_with_duplicate_id_doc`, `TempDir` |
 
 ## How to add ...
 
