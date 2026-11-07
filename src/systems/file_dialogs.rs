@@ -116,9 +116,9 @@ pub fn request_async_dialog(app_state: &AppState, request: AsyncFileDialogReques
 
 /// True while a native dialog is in flight (a receiver exists). The GUI reads this to suspend
 /// tab closes while a dialog is open (one dialog at a time). The pending Save As itself is keyed
-/// by `doc_id`, so a tab closed meanwhile can no longer redirect it — the skip stays so a close
-/// and a dialog result never interleave. Open/Save As requests are already ignored by
-/// [`request_async_dialog`] while a dialog is in flight.
+/// by `doc_id`, so a tab closed meanwhile can no longer redirect it; the GUI still suspends
+/// tab closes so a close and a dialog result never interleave. Open/Save As requests are
+/// already ignored by [`request_async_dialog`] while a dialog is in flight.
 pub fn dialog_in_flight(app_state: &AppState) -> bool {
     app_state
         .get::<AsyncFileDialogMutex>()

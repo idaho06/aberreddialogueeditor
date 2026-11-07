@@ -1,4 +1,6 @@
-//! Test scaffolding shared by the editor, ops and file-dialog test modules.
+//! Test scaffolding shared by every `#[cfg(test)]` module in this binary crate (`tests/`
+//! cannot import its modules). Fixture files under `tests/fixtures/` are read-only: tests never
+//! save over them; save tests write to a [`TempDir`].
 
 use std::path::PathBuf;
 
@@ -8,7 +10,8 @@ use crate::model::{DialogueDoc, Link, NodeKey, Slot, Workspace};
 use crate::ops;
 use crate::state::WorkspaceMutex;
 
-/// A path inside `tests/fixtures/`.
+/// A path inside `tests/fixtures/`. Fixtures are never saved over; save tests write to a
+/// [`TempDir`] instead.
 pub fn fixture(name: &str) -> PathBuf {
     PathBuf::from(env!("CARGO_MANIFEST_DIR"))
         .join("tests/fixtures")
@@ -18,30 +21,37 @@ pub fn fixture(name: &str) -> PathBuf {
 /// The fixture JSON files under `tests/fixtures/`, embedded once — the single source of the
 /// fixture constants every test module uses (`graph::fixtures` re-exports GUARD/LOOPS/DANGLING).
 pub mod json {
+    /// Embedded contents of `tests/fixtures/guard.json`.
     pub const GUARD: &str = include_str!(concat!(
         env!("CARGO_MANIFEST_DIR"),
         "/tests/fixtures/guard.json"
     ));
+    /// Embedded contents of `tests/fixtures/loops.json`.
     pub const LOOPS: &str = include_str!(concat!(
         env!("CARGO_MANIFEST_DIR"),
         "/tests/fixtures/loops.json"
     ));
+    /// Embedded contents of `tests/fixtures/invalid_dangling.json`.
     pub const DANGLING: &str = include_str!(concat!(
         env!("CARGO_MANIFEST_DIR"),
         "/tests/fixtures/invalid_dangling.json"
     ));
+    /// Embedded contents of `tests/fixtures/invalid_dup_id.json`.
     pub const DUP_ID: &str = include_str!(concat!(
         env!("CARGO_MANIFEST_DIR"),
         "/tests/fixtures/invalid_dup_id.json"
     ));
+    /// Embedded contents of `tests/fixtures/invalid_both_next_choices.json`.
     pub const BOTH: &str = include_str!(concat!(
         env!("CARGO_MANIFEST_DIR"),
         "/tests/fixtures/invalid_both_next_choices.json"
     ));
+    /// Embedded contents of `tests/fixtures/invalid_empty_choices.json`.
     pub const EMPTY_CHOICES: &str = include_str!(concat!(
         env!("CARGO_MANIFEST_DIR"),
         "/tests/fixtures/invalid_empty_choices.json"
     ));
+    /// Embedded contents of `tests/fixtures/invalid_no_start.json`.
     pub const NO_START: &str = include_str!(concat!(
         env!("CARGO_MANIFEST_DIR"),
         "/tests/fixtures/invalid_no_start.json"
@@ -103,11 +113,12 @@ pub fn ws_with_duplicate_id_doc() -> Workspace {
     ws
 }
 
-/// A unique temp directory per test, removed on drop. `scope` keeps same-named directories
-/// of different test modules from colliding inside one test process.
+/// A unique temp directory per test, removed on drop.
 pub struct TempDir(PathBuf);
 
 impl TempDir {
+    /// Creates the directory. `scope` keeps same-named directories of different test modules
+    /// from colliding inside one test process.
     pub fn new(scope: &str, name: &str) -> Self {
         let dir = std::env::temp_dir().join(format!(
             "aberred-dialogue-{scope}-{name}-{}",
@@ -118,6 +129,7 @@ impl TempDir {
         Self(dir)
     }
 
+    /// A path inside the temp directory.
     pub fn join(&self, name: &str) -> PathBuf {
         self.0.join(name)
     }

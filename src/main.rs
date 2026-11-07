@@ -1,3 +1,10 @@
+//! AberredDialogueEditor: a node-graph editor for AberredEngine dialogue JSON.
+//!
+//! `main` wires the engine: the shared `AppState` handles are inserted once in `on_setup`, the
+//! `intro` splash plays first and hands over to the `editor` scene. GUI callbacks run on the
+//! render thread while systems and observers run on the logic thread; the two share state only
+//! through those `AppState` handles.
+
 mod graph;
 mod model;
 mod ops;

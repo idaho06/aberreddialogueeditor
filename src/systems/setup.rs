@@ -1,3 +1,6 @@
+//! The engine's `on_setup` hook, run once at startup: inserts the shared `AppState` handles
+//! and seeds the graph resources the globally registered graph systems read.
+
 use aberredengine::prelude::*;
 
 use crate::graph::{GraphEntities, GraphInput};

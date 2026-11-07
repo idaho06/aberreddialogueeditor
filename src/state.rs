@@ -1,3 +1,7 @@
+//! Shared state: the handles inserted into `AppState` once in `on_setup` — the render thread's
+//! cloned `AppState` aliases the same `Arc`s — plus the short-lock helper for the
+//! `WorkspaceMutex`, which is never held across rfd/dialog calls.
+
 use std::sync::atomic::AtomicBool;
 use std::sync::{Arc, Mutex};
 
@@ -15,7 +19,8 @@ pub struct UiCapture {
     pub keyboard: AtomicBool,
 }
 
-/// Shared handle stored in `AppState` (insert once in `on_setup`); the render-thread clone aliases it.
+/// Shared handle stored in `AppState` (insert once in `on_setup`); the render thread's cloned
+/// `AppState` aliases it.
 pub type UiCaptureHandle = Arc<UiCapture>;
 
 /// Shared handle to the single source of truth, stored in `AppState` (insert once in `on_setup`).
@@ -23,10 +28,9 @@ pub type WorkspaceMutex = Arc<Mutex<Workspace>>;
 
 /// Runs `f` with the workspace locked and returns its result, or `None` when the
 /// `WorkspaceMutex` handle is missing from `app_state`. The guard lives only for the closure,
-/// so a caller structurally cannot hold the lock across imgui/rfd calls — the short-lock rule
-/// becomes the shape of the code. Use this for snapshots and short re-lock-and-mutate blocks;
-/// sites that need the `Arc` handle itself (or hold the guard across several statements) keep
-/// using `app_state.get::<WorkspaceMutex>()` directly.
+/// so the lock is never held across rfd/dialog calls; sites that need the `Arc` handle itself
+/// (or hold the guard across several statements) use `app_state.get::<WorkspaceMutex>()`
+/// directly. Use this for snapshots and short re-lock-and-mutate blocks.
 pub fn with_workspace<R>(app_state: &AppState, f: impl FnOnce(&mut Workspace) -> R) -> Option<R> {
     let handle = app_state.get::<WorkspaceMutex>()?;
     let mut ws = handle.lock().unwrap();

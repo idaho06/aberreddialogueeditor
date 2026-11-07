@@ -1,8 +1,10 @@
+//! Observer keeping the render target and the main camera in sync with the window size.
+
 use aberredengine::core::events::window::WindowResized;
 use aberredengine::prelude::*;
 
-/// Keeps the render target and the camera offset in sync with the window size, so mouse coordinates are
-/// 1:1 with render-target pixels. Sizes <= 0 are ignored.
+/// Keeps the render target and the camera offset in sync with the window size, so mouse
+/// coordinates are 1:1 with render-target pixels. Sizes <= 0 are ignored.
 pub fn on_window_resized(
     trigger: On<WindowResized>,
     mut config: ResMut<GameConfig>,
