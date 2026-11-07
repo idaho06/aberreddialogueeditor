@@ -510,6 +510,10 @@ impl Workspace {
     }
 
     /// Removes the doc at `index`, keeping `active` valid (and pointing at the same doc when possible).
+    /// `pending_close` is a TAB INDEX, so it shifts with the tabs: closing the pending tab clears it,
+    /// closing a tab before it decrements it, closing one after it leaves it alone. Without this, a
+    /// close issued while the unsaved-changes modal is open would make the modal confirm the WRONG
+    /// tab (and discard its changes).
     pub fn close_doc(&mut self, index: usize) {
         if index >= self.docs.len() {
             return;
@@ -521,6 +525,24 @@ impl Workspace {
         if self.active >= self.docs.len() {
             self.active = self.docs.len().saturating_sub(1);
         }
+        if let Some(pending) = self.pending_close {
+            self.pending_close = match pending.cmp(&index) {
+                std::cmp::Ordering::Equal => None,
+                std::cmp::Ordering::Greater => Some(pending - 1),
+                std::cmp::Ordering::Less => Some(pending),
+            };
+        }
+    }
+
+    /// Whether any modal is currently open: a queued notification, the unsaved-changes close or quit
+    /// confirm, or Help > "Controls". The GUI gates keyboard-shortcut polling on this, because imgui
+    /// modals block mouse input to other windows but NOT io-level key polling (`ui.is_key_pressed`
+    /// still fires while a modal is open).
+    pub fn has_modal(&self) -> bool {
+        !self.notifications.is_empty()
+            || self.pending_close.is_some()
+            || self.pending_quit
+            || self.show_controls
     }
 
     /// Index of the first doc whose path equals `path`, if any.
@@ -535,6 +557,7 @@ impl Workspace {
 mod tests {
     use super::*;
     use crate::model::lint::ProblemKind;
+    use crate::model::notify::NotificationKind;
     use aberredengine::prelude::{DialogueCondition, DialogueEffect};
 
     /// A doc with `a --next--> b`, `b` having one choice ("go", target End), start = a, clean.
@@ -999,5 +1022,89 @@ mod tests {
         ws.close_doc(1);
         ws.add_doc(DialogueDoc::new_empty());
         assert_eq!(ws.docs[2].doc_id, 4, "closed ids are never reused");
+    }
+
+    /// A workspace with three docs (indices 0, 1, 2).
+    fn ws_three_docs() -> Workspace {
+        let mut ws = Workspace::default();
+        ws.add_doc(DialogueDoc::new_empty());
+        ws.add_doc(DialogueDoc::new_empty());
+        ws.add_doc(DialogueDoc::new_empty());
+        assert_eq!(ws.docs.len(), 3);
+        ws
+    }
+
+    #[test]
+    fn close_doc_keeps_pending_close_consistent_with_the_shifting_tab_indices() {
+        // Closing a tab BEFORE the pending one shifts the pending index down with it.
+        let mut ws = ws_three_docs();
+        ws.pending_close = Some(2);
+        ws.close_doc(0);
+        assert_eq!(ws.pending_close, Some(1), "pending shifts down by one");
+
+        // Closing AT the pending index clears it (the modal's tab is gone).
+        let mut ws = ws_three_docs();
+        ws.pending_close = Some(1);
+        ws.close_doc(1);
+        assert_eq!(ws.pending_close, None, "closing the pending tab clears it");
+
+        // Closing AFTER the pending one leaves the index alone.
+        let mut ws = ws_three_docs();
+        ws.pending_close = Some(0);
+        ws.close_doc(2);
+        assert_eq!(
+            ws.pending_close,
+            Some(0),
+            "pending before the closed tab is untouched"
+        );
+
+        // No pending close: stays None.
+        let mut ws = ws_three_docs();
+        assert_eq!(ws.pending_close, None);
+        ws.close_doc(1);
+        assert_eq!(ws.pending_close, None);
+
+        // Out of range: a no-op, pending_close untouched.
+        let mut ws = ws_three_docs();
+        ws.pending_close = Some(1);
+        ws.close_doc(7);
+        assert_eq!(
+            ws.pending_close,
+            Some(1),
+            "out-of-range close changes nothing"
+        );
+        assert_eq!(ws.docs.len(), 3);
+    }
+
+    #[test]
+    fn has_modal_is_true_exactly_when_a_notification_close_quit_or_controls_modal_is_open() {
+        // (notifications queued, pending_close, pending_quit, show_controls) -> expected has_modal
+        let cases = [
+            (false, false, false, false, false),
+            (true, false, false, false, true),
+            (false, true, false, false, true),
+            (false, false, true, false, true),
+            (false, false, false, true, true),
+            (true, true, true, true, true),
+        ];
+        for (notes, close, quit, controls, expected) in cases {
+            let mut ws = Workspace::default();
+            if notes {
+                ws.notifications.push(Notification {
+                    kind: NotificationKind::Error,
+                    message: "m".to_owned(),
+                });
+            }
+            if close {
+                ws.pending_close = Some(0);
+            }
+            ws.pending_quit = quit;
+            ws.show_controls = controls;
+            assert_eq!(
+                ws.has_modal(),
+                expected,
+                "notifications={notes} pending_close={close} pending_quit={quit} show_controls={controls}"
+            );
+        }
     }
 }

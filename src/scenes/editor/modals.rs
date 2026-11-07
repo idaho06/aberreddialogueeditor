@@ -349,6 +349,44 @@ mod tests {
     }
 
     #[test]
+    fn close_discard_after_another_tab_was_closed_discards_the_original_pending_tab() {
+        // The data-loss scenario: tabs [B clean(0), A dirty(1), C dirty(2)]; X on A sets
+        // pending_close = Some(1) and opens the modal; a shortcut (Ctrl+W) closes B while the
+        // modal is open; "Discard" must close A — the tab the user confirmed — not C, which now
+        // sits at index 1.
+        let mut ws = Workspace::default();
+        ops::new_doc(&mut ws); // B, index 0, clean
+        ws.docs[0].path = Some(std::path::PathBuf::from("/tmp/b.json"));
+        ops::new_doc(&mut ws); // A, index 1
+        ws.docs[1].path = Some(std::path::PathBuf::from("/tmp/a.json"));
+        ws.active_doc_mut().unwrap().add_node(Vec2::ZERO); // A dirty
+        ops::new_doc(&mut ws); // C, index 2
+        ws.docs[2].path = Some(std::path::PathBuf::from("/tmp/c.json"));
+        ws.active_doc_mut().unwrap().add_node(Vec2::ZERO); // C dirty
+
+        ws.pending_close = Some(1); // X clicked on A
+        ops::close_doc(&mut ws, 0); // Ctrl+W closed B while the modal was open
+        assert_eq!(
+            ws.pending_close,
+            Some(0),
+            "closing B shifts the pending close from A(1) to A(0)"
+        );
+        assert_eq!(ws.docs.len(), 2);
+
+        assert_eq!(
+            apply_choice_ws(&mut ws, ModalChoice::CloseDiscard),
+            ChoiceEffect::Nothing
+        );
+        assert_eq!(ws.pending_close, None, "the modal is settled");
+        assert_eq!(ws.docs.len(), 1, "exactly the confirmed tab closed");
+        assert_eq!(
+            ws.docs[0].path.as_deref(),
+            Some(std::path::Path::new("/tmp/c.json")),
+            "C survived; A (the confirmed tab) was discarded"
+        );
+    }
+
+    #[test]
     fn modal_title_is_error_for_plain_errors_and_cannot_save_for_save_rejected() {
         assert_eq!(modal_title(NotificationKind::Error), "Error##modal");
         assert_eq!(

@@ -77,11 +77,17 @@ pub fn graph_frame_system(
     };
     let mut ws = handle.lock().unwrap();
     let Some(doc) = ws.active_doc_mut() else {
-        // No active doc: no preview, no gesture, and the camera is left alone.
+        // No active doc: no preview, no gesture, and the camera is left alone. `prev_mouse` must
+        // be refreshed HERE too, not just `pan_prev`: it feeds the next tick's `step` delta, and
+        // leaving it stale would make the first drag after reopening a doc emit a
+        // `PanByScreenDelta` containing the whole mouse travel that happened while no doc was
+        // open. The workspace lock stays the single one for this tick, and the camera write
+        // stays last in the active-doc path below.
         graph_input.preview = None;
         graph_input.interaction = GraphInteraction::default();
         graph_input.last_doc_id = 0;
         *pan_prev = None;
+        *prev_mouse = Vec2::new(input.mouse_x, input.mouse_y);
         return;
     };
     // (a) Wheel zoom around the cursor and middle-mouse pan by screen-pixel delta (never

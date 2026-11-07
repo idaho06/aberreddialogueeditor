@@ -25,19 +25,26 @@ pub fn gui(ctx: &mut GuiCtx) {
             .store(ctx.ui.io().want_capture_keyboard, Ordering::Relaxed);
     }
 
-    // Brief snapshot for the menu/shortcut enabled states and the Problems check mark; the
-    // guard is dropped immediately.
-    let (active, problems_visible) = with_workspace(ctx.app_state, |ws| {
+    // Brief snapshot for the menu/shortcut enabled states, the Problems check mark and the modal
+    // gate; the guard is dropped immediately.
+    let (active, problems_visible, has_modal) = with_workspace(ctx.app_state, |ws| {
         (
             ws.active_doc().is_some().then_some(ws.active),
             !ws.problems_hidden,
+            ws.has_modal(),
         )
     })
-    .unwrap_or((None, true));
+    .unwrap_or((None, true, false));
 
     let mut action_queue = Vec::new();
     menu::draw(ctx, active, problems_visible, &mut action_queue);
-    shortcuts::poll(ctx, active, &mut action_queue);
+    // imgui modals block mouse input to other windows, but `ui.is_key_pressed` is io-level and
+    // still fires while a modal is open, so shortcuts are NOT polled on a modal frame — otherwise
+    // e.g. Ctrl+W or Ctrl+Shift+S would act behind the unsaved-changes confirm. Menu, tabs,
+    // windows and the modals themselves are drawn exactly as before, in the same order.
+    if !has_modal {
+        shortcuts::poll(ctx, active, &mut action_queue);
+    }
     tabs::draw(ctx, &mut action_queue);
     nodes::draw(ctx);
     inspector::draw(ctx);

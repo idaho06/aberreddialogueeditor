@@ -169,9 +169,11 @@ Full detail in `docs/gotchas.md`. The rules that prevent bugs:
 - Lock discipline: lock `WorkspaceMutex` only for short snapshots and per action, never while calling
   `request_async_dialog`/`dialog_in_flight` or any rfd code; widgets are drawn with the guard dropped.
 - Shortcuts (`shortcuts.rs`) are read with `ui.is_key_pressed(Key::..)` + `io().key_ctrl`/`key_shift`, only when
-  `!io().want_text_input`; `F` does not fire while Ctrl is held. Modals (notification queue, unsaved-changes
-  close/quit, Help > Controls) open from the frame's top-level scope after the menu, one at a time: notification
-  first, Controls last (`modals.rs`; `apply_choice_ws` is the pure core).
+  `!io().want_text_input`; `F` does not fire while Ctrl is held; shortcuts are not polled while a modal is open
+  (`gui.rs` skips `shortcuts::poll` for that frame when `Workspace::has_modal()` — imgui modals do not block
+  io-level key polling). Modals (notification queue, unsaved-changes close/quit, Help > Controls) open from the
+  frame's top-level scope after the menu, one at a time: notification first, Controls last (`modals.rs`;
+  `apply_choice_ws` is the pure core).
 - Tabs (`tabs.rs`): ids `###doc{doc_id}` (`actions::tab_label`) so a dirty star or a closed tab never changes a
   tab's identity; on the `SET_SELECTED` frame every tab's selected report is ignored (`clicked_focus`); a
   clicked X drops imgui's neighbour re-selection and re-asserts the real active tab next frame

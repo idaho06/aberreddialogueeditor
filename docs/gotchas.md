@@ -61,6 +61,10 @@ against this repo's `src/`.
   makes imgui re-select a neighbour in the same frame. Rule: `tabs::draw` ignores every tab's selected report on
   the `SET_SELECTED` frame (`clicked_focus`), and a frame with a clicked X drops the pending focus and
   re-asserts the real active tab on the next frame (`resolve_focus` + `LAST_ACTIVE` reset to `None`).
+- **imgui modals do not block io-level key polling.** A modal popup masks mouse input to other windows, but
+  `ui.is_key_pressed` reads io-level key state and still fires while a modal is open. Rule: gate keyboard
+  shortcuts on `Workspace::has_modal()` — `gui.rs` skips `shortcuts::poll` for that frame while any modal is
+  open.
 
 ## Editor internals
 
