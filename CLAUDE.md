@@ -80,7 +80,7 @@ Full detail in `docs/gotchas.md`. The rules that prevent bugs:
 
 - `src/model` is pure: plain data and functions, no imgui/ECS/window. Its only engine imports are
   `aberredengine::prelude::{DialogueDef, NodeDef, ChoiceDef, DialogueCondition, DialogueCmp, DialogueEffect,
-  DialogueTree, DialogueError, Vec2}`.
+  DialogueTree, DialogueError, DialogueTextField, Vec2, validate_signal_text}`.
 - `Workspace` is the single source of truth (`docs/architecture.md` has the full shape) and also carries the
   typed modal queue `notifications: Vec<Notification>` (`Notification`/`NotificationKind` in
   `src/model/notify.rs`), `problems_hidden` (the INVERSE visibility flag of the Problems window — the derived
@@ -97,9 +97,10 @@ Full detail in `docs/gotchas.md`. The rules that prevent bugs:
 - `from_def`/`to_def` convert to/from the engine's `DialogueDef`, only at load/save. `from_def` is tolerant
   (dangling refs -> `Link::Dangling`, load warnings); `to_def` is total and never emits both `next` and
   `choices` or `choices: Some(vec![])`.
-- `lint::lint` reports ALL problems of a doc (cached per `content_revision` via `DialogueDoc::problems`);
-  `lint::engine_gate` (`DialogueTree::try_from(to_def(doc))`) is the save gate — engine rules are never
-  reimplemented in the model.
+- `lint::lint` reports ALL problems of a doc (cached per `content_revision` via `DialogueDoc::problems`), including
+  malformed placeholders (`BadPlaceholder`): it calls the engine's `validate_signal_text` on the node `text`, node
+  `speaker` and each choice `text` rather than reimplementing the grammar. `lint::engine_gate`
+  (`DialogueTree::try_from(to_def(doc))`) is the save gate — engine rules are never reimplemented in the model.
 
 ## Ops
 

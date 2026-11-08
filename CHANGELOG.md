@@ -1,5 +1,12 @@
 # Changelog
 
+## Unreleased
+
+- `aberredengine` bumped to the placeholders commit.
+- Malformed placeholders in a node's `text` or `speaker` or a choice's `text` are reported in the Problems window
+  and no longer save.
+- The dialogue authoring guide documents the placeholder syntax.
+
 ## 0.2.0
 
 First public release.

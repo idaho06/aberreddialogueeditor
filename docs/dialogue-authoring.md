@@ -30,6 +30,40 @@ have the key?) and tells the game what happened (the guard is offended).
 
 The conversation is data only. The engine runs it (`DialogueRunner`) and fires events; **your game draws it**.
 
+## Placeholders
+
+Node `text`, node `speaker` and choice `text` are **placeholder templates**. The editor shows and saves them raw;
+your game fills them in when it draws the line (`runner.text()` and `runner.speaker()` return the template as
+written).
+
+| Syntax | Reads | Meaning |
+|---|---|---|
+| `{key}` | World signals | The signal's value as text; a set flag prints `true`. |
+| `{self.key}` | The entity's `Signals` | The signals the game passes in for the running entity. |
+| `{key:.N}` | World signals | A number printed with `N` digits after the point (`N` is `0`..=`6`); `{self.key:.N}` works too. |
+| `{{` / `}}` | — | A literal `{` or `}`. |
+
+Only a suffix after the LAST `:` that starts with `.` is a spec, so `{group_count:enemies}` is one key. The
+malformed shapes — an unclosed `{`, a stray `}`, an empty key (`{}`, `{self.}`), a bad spec (`{k:.7}`, `{k:.}`,
+`{k:.x}`) — are a lint error ("Bad placeholder" below): the Problems window shows them and saving is refused with
+"Cannot save".
+
+Your game fills a template in itself. In Rust:
+
+```rust
+let line = format_signal_text(template, &world_signals, Some(&entity_signals));
+```
+
+In Lua, from a dialogue callback:
+
+```lua
+local line = engine.format_text(dialogue.text, ctx.signals)
+```
+
+An unknown key keeps its literal token (`{key}` prints as `{key}`), and the engine logs one warning per missing key
+when a node is entered — so set the signal before the node is entered: in a choice's `effects`, in a node's
+`on_enter`, or before requesting the transition.
+
 ## Writing a dialogue in the editor
 
 ### Create and connect nodes
@@ -90,6 +124,7 @@ and centre the node.
 | Start missing | error | No start node is set. |
 | Empty id | error | A node has an empty `id`. |
 | Duplicate id | error | Two nodes share an `id`. |
+| Bad placeholder | error | A text, speaker or choice text has a malformed {...} placeholder. |
 | Dangling target | error | A `next` or choice points at an id that does not exist (only possible from a loaded file). |
 | Unreachable | warning | No path from the start node reaches the node. It still loads and runs. |
 

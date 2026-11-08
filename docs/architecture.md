@@ -33,7 +33,7 @@ render thread (GUI callback fn(&mut GuiCtx))        shared (AppState, inserted o
 
 `src/model` is pure: plain data and functions, no ECS/imgui/window. Its only engine imports are
 `aberredengine::prelude::{DialogueDef, NodeDef, ChoiceDef, DialogueCondition, DialogueCmp, DialogueEffect,
-DialogueTree, DialogueError, Vec2}`.
+DialogueTree, DialogueError, DialogueTextField, Vec2, validate_signal_text}`.
 
 - `Workspace { docs: Vec<DialogueDoc>, active: usize, next_doc_id, notifications, problems_hidden,
   pending_close, pending_quit, show_controls, show_about, pending_context_menu }` — the single source of truth.
@@ -54,8 +54,8 @@ DialogueTree, DialogueError, Vec2}`.
 - `doc.problems()` is the lint cache: `lint_cache: Option<(content_revision, Vec<Problem>)>`, recomputed only
   when `content_revision` changed — dragging/selecting/camera moves never re-run the linter.
 - `lint::lint` reports ALL problems of a doc (doc-level `StartMissing` first, then by node order, then by
-  `ProblemKind`): errors `StartMissing`, `EmptyId`, `DuplicateId`, `DanglingTarget`; warning `Unreachable`
-  (BFS from start; skipped when the start is missing). `lint::engine_gate(doc)` =
+  `ProblemKind`): errors `StartMissing`, `EmptyId`, `DuplicateId`, `BadPlaceholder`, `DanglingTarget`; warning
+  `Unreachable` (BFS from start; skipped when the start is missing). `lint::engine_gate(doc)` =
   `DialogueTree::try_from(to_def(doc))` is the save gate — engine rules are never reimplemented in the model.
 - `from_def`/`to_def` (`src/model/convert.rs`) convert to/from the engine's `DialogueDef` and run **only at
   load/save**. `from_def` is tolerant (never fails; dangling refs become `Link::Dangling`, broken shapes get
