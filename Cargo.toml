@@ -13,7 +13,7 @@ categories = ["game-development"]
 publish = false
 
 [dependencies]
-aberredengine = { git = "https://github.com/idaho06/aberredengine.git", rev = "4417696c6932b8b66ec1eab958ab12d09cbd9aab", default-features = false }
+aberredengine = { git = "https://github.com/idaho06/aberredengine.git", rev = "6c4d8ee19222c574822a09421326d6b2db3b5a3f", default-features = false }
 log = "0.4"
 env_logger = "0.11"
 serde = { version = "1", features = ["derive"] }

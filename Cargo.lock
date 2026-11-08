@@ -5,7 +5,7 @@ version = 4
 [[package]]
 name = "aberred-audio"
 version = "0.2.0"
-source = "git+https://github.com/idaho06/aberredengine.git?rev=4417696c6932b8b66ec1eab958ab12d09cbd9aab#4417696c6932b8b66ec1eab958ab12d09cbd9aab"
+source = "git+https://github.com/idaho06/aberredengine.git?rev=6c4d8ee19222c574822a09421326d6b2db3b5a3f#6c4d8ee19222c574822a09421326d6b2db3b5a3f"
 dependencies = [
  "aberred-core",
  "bevy_ecs",
@@ -18,7 +18,7 @@ dependencies = [
 [[package]]
 name = "aberred-core"
 version = "0.2.0"
-source = "git+https://github.com/idaho06/aberredengine.git?rev=4417696c6932b8b66ec1eab958ab12d09cbd9aab#4417696c6932b8b66ec1eab958ab12d09cbd9aab"
+source = "git+https://github.com/idaho06/aberredengine.git?rev=6c4d8ee19222c574822a09421326d6b2db3b5a3f#6c4d8ee19222c574822a09421326d6b2db3b5a3f"
 dependencies = [
  "arrayvec",
  "bevy_ecs",
@@ -41,7 +41,7 @@ dependencies = [
 [[package]]
 name = "aberred-render"
 version = "0.2.0"
-source = "git+https://github.com/idaho06/aberredengine.git?rev=4417696c6932b8b66ec1eab958ab12d09cbd9aab#4417696c6932b8b66ec1eab958ab12d09cbd9aab"
+source = "git+https://github.com/idaho06/aberredengine.git?rev=6c4d8ee19222c574822a09421326d6b2db3b5a3f#6c4d8ee19222c574822a09421326d6b2db3b5a3f"
 dependencies = [
  "aberred-core",
  "bevy_ecs",
@@ -69,7 +69,7 @@ dependencies = [
 [[package]]
 name = "aberredengine"
 version = "0.2.0"
-source = "git+https://github.com/idaho06/aberredengine.git?rev=4417696c6932b8b66ec1eab958ab12d09cbd9aab#4417696c6932b8b66ec1eab958ab12d09cbd9aab"
+source = "git+https://github.com/idaho06/aberredengine.git?rev=6c4d8ee19222c574822a09421326d6b2db3b5a3f#6c4d8ee19222c574822a09421326d6b2db3b5a3f"
 dependencies = [
  "aberred-audio",
  "aberred-core",
