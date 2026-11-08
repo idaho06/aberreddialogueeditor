@@ -7,7 +7,9 @@
 
 use std::collections::{HashMap, HashSet};
 
-use aberredengine::prelude::{DialogueError, DialogueTree};
+use aberredengine::prelude::{
+    DialogueError, DialogueTextField, DialogueTree, validate_signal_text,
+};
 
 use crate::model::convert::to_def;
 use crate::model::doc::{DialogueDoc, EdChoice, Link, NodeKey, Outputs};
@@ -30,6 +32,11 @@ pub enum ProblemKind {
     EmptyId,
     /// Several nodes share one id; reported for EVERY node carrying that id.
     DuplicateId,
+    /// A node `text`, `speaker` or choice `text` is a malformed `{...}` placeholder template. This
+    /// mirrors the engine's save-gate check by calling the engine's own `validate_signal_text`, so
+    /// the template grammar lives in the engine and is never reimplemented here — a lint-clean doc
+    /// always passes the gate.
+    BadPlaceholder,
     /// A `next` or choice target is a [`Link::Dangling`] reference.
     DanglingTarget,
     /// The node is not reachable from `start` by following [`Link::Node`] edges (warning only;
@@ -52,7 +59,8 @@ pub struct Problem {
 
 /// Reports every problem of `doc`, deterministically ordered: the doc-level [`ProblemKind::StartMissing`]
 /// first, then per node in `doc.nodes` order, and within a node by [`ProblemKind`] order (a node's
-/// `next` dangling link is reported before its choices' dangling links).
+/// malformed placeholder fields are reported before its dangling links, and its `next` dangling link
+/// before its choices' dangling links).
 pub fn lint(doc: &DialogueDoc) -> Vec<Problem> {
     let mut problems = Vec::new();
 
@@ -113,6 +121,35 @@ pub fn lint(doc: &DialogueDoc) -> Vec<Problem> {
                 message: format!("duplicate node id \"{}\"", node.id),
             });
         }
+        // Placeholder templates, in the engine's own check order (text, speaker, choice texts): the
+        // save gate rejects a malformed one, so lint reports it to stay sound against the gate.
+        check_placeholder(
+            &mut problems,
+            &node.id,
+            key,
+            DialogueTextField::Text,
+            &node.text,
+        );
+        if let Some(speaker) = &node.speaker {
+            check_placeholder(
+                &mut problems,
+                &node.id,
+                key,
+                DialogueTextField::Speaker,
+                speaker,
+            );
+        }
+        if let Outputs::Choices(choices) = &node.out {
+            for (i, choice) in choices.iter().enumerate() {
+                check_placeholder(
+                    &mut problems,
+                    &node.id,
+                    key,
+                    DialogueTextField::Choice(i),
+                    &choice.text,
+                );
+            }
+        }
         for link in out_links(&node.out) {
             if let Link::Dangling(target) = link {
                 problems.push(Problem {
@@ -140,6 +177,28 @@ pub fn lint(doc: &DialogueDoc) -> Vec<Problem> {
     }
 
     problems
+}
+
+/// Reports `text` as a [`ProblemKind::BadPlaceholder`] of the node `key` when it fails the engine's
+/// `validate_signal_text`. The message mirrors the engine's `DialogueError::BadPlaceholder` Display,
+/// with `field` naming which text field holds the malformed template.
+fn check_placeholder(
+    problems: &mut Vec<Problem>,
+    node_id: &str,
+    key: NodeKey,
+    field: DialogueTextField,
+    text: &str,
+) {
+    if let Err(source) = validate_signal_text(text) {
+        problems.push(Problem {
+            severity: Severity::Error,
+            kind: ProblemKind::BadPlaceholder,
+            node: Some(key),
+            message: format!(
+                "dialogue node \"{node_id}\" has a malformed placeholder in its {field}: {source}"
+            ),
+        });
+    }
 }
 
 /// A node's outgoing links in report order: the `next` link first, then the choices' targets.
@@ -275,6 +334,23 @@ mod tests {
             ("choice_to_a", |d, a, b| {
                 d.set_link(b, Slot::Choice(0), Link::Node(a))
             }),
+            ("valid_placeholder_text", |d, a, _| {
+                d.set_text(a, "I have {self.apples} apples, {grain:.1} kg".to_owned())
+            }),
+            ("malformed_text", |d, a, _| d.set_text(a, "hi {".to_owned())),
+            ("malformed_speaker", |d, a, _| {
+                d.set_speaker(a, Some("{}".to_owned()))
+            }),
+            ("malformed_choice_text", |d, _, b| {
+                // No-op when b is not a choices node or has no choices.
+                let last = match d.node(b).map(|n| &n.out) {
+                    Some(Outputs::Choices(v)) => v.len().checked_sub(1),
+                    _ => None,
+                };
+                if let Some(last) = last {
+                    d.set_choice_text(b, last, "{k:.9}".to_owned());
+                }
+            }),
         ]
     }
 
@@ -399,6 +475,125 @@ mod tests {
         assert!(
             of_kind(&lint(&doc), ProblemKind::DanglingTarget)
                 .any(|p| p.severity == Severity::Error && p.node == Some(b))
+        );
+    }
+
+    #[test]
+    fn coverage_bad_placeholder_maps_to_lint_error() {
+        // Bad node text: an unclosed `{`.
+        let (mut doc, a, _b) = base_doc();
+        doc.set_text(a, "hi {".to_owned());
+        let err = gate_err(&doc);
+        assert!(
+            matches!(&err, DialogueError::BadPlaceholder { node, field: DialogueTextField::Text, .. } if node == "node_1"),
+            "got {err:?}"
+        );
+        let problems = lint(&doc);
+        let bad: Vec<&Problem> = of_kind(&problems, ProblemKind::BadPlaceholder).collect();
+        assert_eq!(bad.len(), 1);
+        assert_eq!(bad[0].severity, Severity::Error);
+        assert_eq!(bad[0].node, Some(a));
+        assert!(
+            bad[0].message.contains("text"),
+            "the message names the field: {}",
+            bad[0].message
+        );
+        assert_eq!(
+            bad[0].message,
+            err.to_string(),
+            "lint message mirrors the engine's BadPlaceholder Display"
+        );
+
+        // Bad speaker: an empty key.
+        let (mut doc, a, _b) = base_doc();
+        doc.set_speaker(a, Some("{}".to_owned()));
+        let err = gate_err(&doc);
+        assert!(
+            matches!(&err, DialogueError::BadPlaceholder { node, field: DialogueTextField::Speaker, .. } if node == "node_1"),
+            "got {err:?}"
+        );
+        let problems = lint(&doc);
+        let bad: Vec<&Problem> = of_kind(&problems, ProblemKind::BadPlaceholder).collect();
+        assert_eq!(bad.len(), 1);
+        assert_eq!(bad[0].severity, Severity::Error);
+        assert_eq!(bad[0].node, Some(a));
+        assert!(
+            bad[0].message.contains("speaker"),
+            "the message names the field: {}",
+            bad[0].message
+        );
+        assert_eq!(bad[0].message, err.to_string());
+
+        // Bad SECOND choice text: a precision digit outside 0..=6.
+        let (mut doc, _a, b) = base_doc();
+        doc.add_choice(b);
+        doc.set_choice_text(b, 1, "{k:.9}".to_owned());
+        let err = gate_err(&doc);
+        assert!(
+            matches!(&err, DialogueError::BadPlaceholder { node, field, .. } if node == "node_2" && *field == DialogueTextField::Choice(1)),
+            "got {err:?}"
+        );
+        let problems = lint(&doc);
+        let bad: Vec<&Problem> = of_kind(&problems, ProblemKind::BadPlaceholder).collect();
+        assert_eq!(bad.len(), 1);
+        assert_eq!(bad[0].severity, Severity::Error);
+        assert_eq!(bad[0].node, Some(b));
+        assert!(
+            bad[0].message.contains("choice 1 text"),
+            "the message names the field: {}",
+            bad[0].message
+        );
+        assert_eq!(bad[0].message, err.to_string());
+    }
+
+    #[test]
+    fn valid_placeholders_are_no_problem_and_pass_the_engine_gate() {
+        let (mut doc, a, _b) = base_doc();
+        doc.set_text(
+            a,
+            "I have {self.apples} apples, {grain:.1} kg, {{literal}}".to_owned(),
+        );
+        doc.set_speaker(a, Some("{player_name}".to_owned()));
+        let problems = lint(&doc);
+        assert!(
+            has_no_kind(&problems, ProblemKind::BadPlaceholder),
+            "valid templates produce no BadPlaceholder: {problems:?}"
+        );
+        assert!(
+            engine_gate(&doc).is_ok(),
+            "the engine gate accepts valid placeholders"
+        );
+    }
+
+    #[test]
+    fn bad_placeholder_fields_of_one_node_report_in_field_order() {
+        let (mut doc, a, _b) = base_doc();
+        doc.set_text(a, "hi {".to_owned());
+        doc.set_speaker(a, Some("{}".to_owned()));
+        doc.add_choice(a); // a becomes a choices node with one empty choice
+        doc.set_choice_text(a, 0, "{k:.7}".to_owned());
+        let problems = lint(&doc);
+        let bad: Vec<&Problem> = of_kind(&problems, ProblemKind::BadPlaceholder).collect();
+        assert_eq!(bad.len(), 3, "one problem per bad field: {problems:?}");
+        assert!(
+            bad.iter()
+                .all(|p| p.severity == Severity::Error && p.node == Some(a)),
+            "all three on node a as Errors: {bad:?}"
+        );
+        assert!(
+            bad[0].message.contains("its text:"),
+            "text first: {}",
+            bad[0].message
+        );
+        assert!(
+            bad[1].message.contains("its speaker:"),
+            "speaker second: {}",
+            bad[1].message
+        );
+        assert!(
+            bad[2].message.contains("its choice 0 text:"),
+            "choice text last: {}",
+            bad[2].message
         );
     }
 
