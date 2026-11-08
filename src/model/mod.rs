@@ -2,7 +2,8 @@
 //! `DialogueDef`. No ECS, no imgui, no window — everything here is plain data and unit-testable.
 //!
 //! Engine imports are limited to `aberredengine::prelude::{DialogueDef, NodeDef, ChoiceDef,
-//! DialogueCondition, DialogueCmp, DialogueEffect, DialogueTree, DialogueError, Vec2}`.
+//! DialogueCondition, DialogueCmp, DialogueEffect, DialogueTree, DialogueError, DialogueTextField, Vec2,
+//! validate_signal_text}`.
 
 mod convert;
 mod doc;
